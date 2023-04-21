@@ -25,3 +25,12 @@ list(TRANSFORM SRC PREPEND src/)
 add_library(aiopp ${SRC})
 target_include_directories(aiopp PUBLIC include)
 set_wall(aiopp)
+
+find_package(spdlog REQUIRED)
+find_package(fmt REQUIRED)
+
+add_executable(http src/http.cpp)
+target_link_libraries(http aiopp)
+target_link_libraries(http spdlog)
+target_link_libraries(http fmt)
+set_wall(http)
