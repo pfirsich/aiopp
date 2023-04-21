@@ -1,0 +1,6 @@
+BasedOnStyle: WebKit # [LLVM, Google, Chromium, Mozilla, WebKit, Microsoft]
+ColumnLimit: 100
+Standard: Cpp11
+AllowShortFunctionsOnASingleLine: None
+AlwaysBreakTemplateDeclarations: true
+ReflowComments: false

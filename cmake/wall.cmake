@@ -1,0 +1,6 @@
+function(set_wall target)
+  if(NOT MSVC AND CMAKE_BUILD_TYPE MATCHES "Debug")
+    message(STATUS "Using -Wall/-Werror")
+    target_compile_options(${target} PRIVATE -Wall -Wextra -pedantic -Werror)
+  endif()
+endfunction()
