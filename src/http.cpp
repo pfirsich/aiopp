@@ -1,5 +1,3 @@
-#include <iostream>
-
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -8,36 +6,47 @@
 
 #include "ioqueue.hpp"
 
+aiopp::Fd createListenSocket()
+{
+    aiopp::Fd sock_ { ::socket(AF_INET, SOCK_STREAM, 0) };
+    if (sock_ == -1) {
+        spdlog::error("Could not create socket: {}", errno);
+        return aiopp::Fd {};
+    }
+
+    sockaddr_in addr;
+    ::memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(6942);
+
+    const int reuse = 1;
+    if (::setsockopt(sock_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == -1) {
+        spdlog::error("Could not set sockopt SO_REUSEADDR");
+        return aiopp::Fd {};
+    }
+
+    if (::bind(sock_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == -1) {
+        spdlog::error("Could not bind socket: {}", errno);
+        return aiopp::Fd {};
+    }
+
+    if (::listen(sock_, SOMAXCONN) == -1) {
+        spdlog::error("Could not listen on socket: {}", errno);
+        return aiopp::Fd {};
+    }
+
+    return sock_;
+}
+
 class Server {
 public:
     Server(aiopp::IoQueue& io)
         : io_(io)
-        , listenSocket_(::socket(AF_INET, SOCK_STREAM, 0))
+        , listenSocket_(createListenSocket())
     {
         if (listenSocket_ == -1) {
-            spdlog::critical("Could not create listen socket: {}", errno);
-            std::exit(1);
-        }
-
-        sockaddr_in addr;
-        ::memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = INADDR_ANY;
-        addr.sin_port = htons(6942);
-
-        const int reuse = 1;
-        if (::setsockopt(listenSocket_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == -1) {
-            spdlog::critical("Could not set sockopt SO_REUSEADDR");
-            std::exit(1);
-        }
-
-        if (::bind(listenSocket_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == -1) {
-            spdlog::critical("Could not bind socket: {}", errno);
-            std::exit(1);
-        }
-
-        if (::listen(listenSocket_, SOMAXCONN) == -1) {
-            spdlog::critical("Could not listen on socket: {}", errno);
+            spdlog::critical("Could not create listen socket");
             std::exit(1);
         }
     }
