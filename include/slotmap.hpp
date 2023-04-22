@@ -8,24 +8,16 @@ namespace aiopp {
 template <typename T>
 class SlotMap {
 public:
-    SlotMap()
-    {
-    }
+    SlotMap() { }
 
     SlotMap(size_t size)
         : data_(size)
     {
     }
 
-    size_t size() const
-    {
-        return data_.occupied();
-    }
+    size_t size() const { return data_.occupied(); }
 
-    bool contains(size_t index) const
-    {
-        return data_.contains(index);
-    }
+    bool contains(size_t index) const { return data_.contains(index); }
 
     void resize(size_t size)
     {

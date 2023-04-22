@@ -11,9 +11,7 @@ class Function<Ret(Args...)> {
 public:
     Function() = default;
 
-    Function(std::nullptr_t)
-    {
-    }
+    Function(std::nullptr_t) { }
 
     template <typename Func>
     Function(Func&& func)
@@ -41,17 +39,11 @@ public:
         return *this;
     }
 
-    Function& operator=(std::nullptr_t)
-    {
-        callable_.reset();
-    }
+    Function& operator=(std::nullptr_t) { callable_.reset(); }
 
     Function& operator=(const Function&) = delete;
 
-    explicit operator bool() const
-    {
-        return callable_;
-    }
+    explicit operator bool() const { return callable_; }
 
     Ret operator()(Args... args) const
     {
@@ -80,10 +72,7 @@ private:
         {
         }
 
-        Ret operator()(Args... args) const override
-        {
-            return func(std::forward<Args>(args)...);
-        }
+        Ret operator()(Args... args) const override { return func(std::forward<Args>(args)...); }
     };
 
     std::unique_ptr<CallableBase> callable_;

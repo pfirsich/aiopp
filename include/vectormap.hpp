@@ -18,20 +18,11 @@ public:
     {
     }
 
-    ~VectorMap()
-    {
-        delete[] data_;
-    }
+    ~VectorMap() { delete[] data_; }
 
-    size_t size() const
-    {
-        return size_;
-    }
+    size_t size() const { return size_; }
 
-    size_t occupied() const
-    {
-        return numOccupied_;
-    }
+    size_t occupied() const { return numOccupied_; }
 
     void resize(size_t size)
     {
@@ -47,15 +38,9 @@ public:
         occupied_.resize(size, bool_ { false });
     }
 
-    void insert(size_t index, const T& v)
-    {
-        emplace(index, v);
-    }
+    void insert(size_t index, const T& v) { emplace(index, v); }
 
-    void insert(size_t index, T&& v)
-    {
-        emplace(index, std::move(v));
-    }
+    void insert(size_t index, T&& v) { emplace(index, std::move(v)); }
 
     template <typename... Args>
     T& emplace(size_t index, Args&&... args)
@@ -70,10 +55,7 @@ public:
         return *reinterpret_cast<T*>(data_ + index);
     }
 
-    bool contains(size_t index) const
-    {
-        return index < occupied_.size() && occupied_[index].value;
-    }
+    bool contains(size_t index) const { return index < occupied_.size() && occupied_[index].value; }
 
     void remove(size_t index)
     {

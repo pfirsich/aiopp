@@ -14,10 +14,7 @@ public:
     {
     }
 
-    void produce(T&& value)
-    {
-        produce(new Node { std::move(value), nullptr });
-    }
+    void produce(T&& value) { produce(new Node { std::move(value), nullptr }); }
 
     std::optional<T> consume()
     {
