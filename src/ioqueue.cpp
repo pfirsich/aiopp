@@ -111,6 +111,16 @@ bool IoQueue::poll(int fd, short events, HandlerEcRes cb)
     return addSqe(ring_.preparePollAdd(fd, events), std::move(cb));
 }
 
+bool IoQueue::recvmsg(int sockfd, ::msghdr* msg, int flags, HandlerEcRes cb)
+{
+    return addSqe(ring_.prepareRecvmsg(sockfd, msg, flags), std::move(cb));
+}
+
+bool IoQueue::sendmsg(int sockfd, const ::msghdr* msg, int flags, HandlerEcRes cb)
+{
+    return addSqe(ring_.prepareSendmsg(sockfd, msg, flags), std::move(cb));
+}
+
 IoQueue::NotifyHandle::NotifyHandle(std::shared_ptr<EventFd> eventFd)
     : eventFd_(std::move(eventFd))
 {

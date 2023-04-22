@@ -68,6 +68,10 @@ public:
 
     bool poll(int fd, short events, HandlerEcRes cb);
 
+    bool recvmsg(int sockfd, ::msghdr* msg, int flags, HandlerEcRes cb);
+
+    bool sendmsg(int sockfd, const ::msghdr* msg, int flags, HandlerEcRes cb);
+
     class NotifyHandle {
     public:
         NotifyHandle(std::shared_ptr<EventFd> eventFd);
