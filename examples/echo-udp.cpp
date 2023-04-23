@@ -1,9 +1,7 @@
-#include <coroutine>
-
-#include <spdlog/spdlog.h>
-
 #include "aiopp/ioqueue.hpp"
 #include "aiopp/socket.hpp"
+
+#include "spdlogger.hpp"
 
 using namespace aiopp;
 
@@ -66,6 +64,8 @@ private:
 
 int main()
 {
+    setLogger(std::make_unique<SpdLogger>());
+
     auto socket = createSocket(SocketType::Udp, IpAddress::parse("0.0.0.0").value(), 4242);
     if (socket == -1) {
         return 1;

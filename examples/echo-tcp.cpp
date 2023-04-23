@@ -127,12 +127,13 @@ private:
 
 int main()
 {
+    setLogger(std::make_unique<SpdLogger>());
+
     auto socket = createTcpListenSocket(IpAddress::parse("0.0.0.0").value(), 4242);
     if (socket == -1) {
         return 1;
     }
 
-    setLogger(std::make_unique<SpdLogger>());
     IoQueue io;
     Server server(io, std::move(socket));
     server.start();

@@ -68,7 +68,7 @@ BasicCoroutine serve(IoQueue& io, Fd&& listenSocket)
 
 int main()
 {
-    aiopp::setLogger(std::make_unique<SpdLogger>());
+    setLogger(std::make_unique<SpdLogger>());
 
     auto socket = createTcpListenSocket(IpAddress::parse("0.0.0.0").value(), 4242);
     if (socket == -1) {
