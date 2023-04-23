@@ -8,9 +8,11 @@
 
 #include "spdlogger.hpp"
 
+using namespace aiopp;
+
 class Server {
 public:
-    Server(aiopp::IoQueue& io, aiopp::Fd listenSocket)
+    Server(IoQueue& io, Fd listenSocket)
         : io_(io)
         , listenSocket_(std::move(listenSocket))
     {
@@ -21,7 +23,7 @@ public:
 private:
     class Session {
     public:
-        Session(Server& server, aiopp::Fd fd)
+        Session(Server& server, Fd fd)
             : server_(server)
             , fd_(std::move(fd))
         {
@@ -92,7 +94,7 @@ private:
         }
 
         Server& server_;
-        aiopp::Fd fd_;
+        Fd fd_;
         std::string recvBuffer_;
         size_t sendOffset_;
     };
@@ -119,19 +121,19 @@ private:
         session->start(std::move(session));
     }
 
-    aiopp::IoQueue& io_;
-    aiopp::Fd listenSocket_;
+    IoQueue& io_;
+    Fd listenSocket_;
 };
 
 int main()
 {
-    auto socket = aiopp::createTcpListenSocket(aiopp::IpAddress::parse("0.0.0.0").value(), 4242);
+    auto socket = createTcpListenSocket(IpAddress::parse("0.0.0.0").value(), 4242);
     if (socket == -1) {
         return 1;
     }
 
-    aiopp::setLogger(std::make_unique<SpdLogger>());
-    aiopp::IoQueue io;
+    setLogger(std::make_unique<SpdLogger>());
+    IoQueue io;
     Server server(io, std::move(socket));
     server.start();
     io.run();
