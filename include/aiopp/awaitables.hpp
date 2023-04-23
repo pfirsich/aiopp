@@ -5,7 +5,6 @@
 #include "aiopp/ioqueue.hpp"
 
 namespace aiopp {
-
 template <typename Method, typename... Args>
 class IoQueueAwaitable {
 public:
@@ -14,7 +13,7 @@ public:
         int result;
     };
 
-    IoQueueAwaitable(aiopp::IoQueue& io, Method method, Args... args)
+    IoQueueAwaitable(IoQueue& io, Method method, Args... args)
         : io_(io)
         , method_(method)
         , args_(std::make_tuple(args...))
@@ -24,12 +23,12 @@ public:
     auto operator co_await()
     {
         struct Awaiter {
-            aiopp::IoQueue& io;
+            IoQueue& io;
             Method method;
             std::tuple<Args...> args;
             Result result = {};
 
-            Awaiter(aiopp::IoQueue& io, Method method, std::tuple<Args...> args)
+            Awaiter(IoQueue& io, Method method, std::tuple<Args...> args)
                 : io(io)
                 , method(method)
                 , args(std::move(args))
@@ -57,29 +56,28 @@ public:
     }
 
 private:
-    aiopp::IoQueue& io_;
+    IoQueue& io_;
     Method method_;
     std::tuple<Args...> args_;
 };
 
-auto accept(aiopp::IoQueue& io, int fd, ::sockaddr_in* addr, ::socklen_t* addrLen)
+auto accept(IoQueue& io, int fd, ::sockaddr_in* addr, ::socklen_t* addrLen)
 {
-    return IoQueueAwaitable<decltype(&aiopp::IoQueue::accept), int, ::sockaddr_in*, ::socklen_t*>(
-        io, &aiopp::IoQueue::accept, fd, addr, addrLen);
+    return IoQueueAwaitable<decltype(&IoQueue::accept), int, ::sockaddr_in*, ::socklen_t*>(
+        io, &IoQueue::accept, fd, addr, addrLen);
 }
 
-auto recv(aiopp::IoQueue& io, int sock, void* buf, size_t len)
+auto recv(IoQueue& io, int sock, void* buf, size_t len)
 {
-    using RecvType = bool (aiopp::IoQueue::*)(int, void*, size_t, aiopp::IoQueue::HandlerEcRes);
+    using RecvType = bool (IoQueue::*)(int, void*, size_t, IoQueue::HandlerEcRes);
     return IoQueueAwaitable<RecvType, int, void*, size_t>(
-        io, static_cast<RecvType>(&aiopp::IoQueue::recv), sock, buf, len);
+        io, static_cast<RecvType>(&IoQueue::recv), sock, buf, len);
 }
 
-auto send(aiopp::IoQueue& io, int sock, const void* buf, size_t len)
+auto send(IoQueue& io, int sock, const void* buf, size_t len)
 {
-    using SendType
-        = bool (aiopp::IoQueue::*)(int, const void*, size_t, aiopp::IoQueue::HandlerEcRes);
+    using SendType = bool (IoQueue::*)(int, const void*, size_t, IoQueue::HandlerEcRes);
     return IoQueueAwaitable<SendType, int, const void*, size_t>(
-        io, static_cast<SendType>(&aiopp::IoQueue::send), sock, buf, len);
+        io, static_cast<SendType>(&IoQueue::send), sock, buf, len);
 }
 }
