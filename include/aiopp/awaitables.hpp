@@ -80,4 +80,16 @@ auto send(IoQueue& io, int sock, const void* buf, size_t len)
     return IoQueueAwaitable<SendType, int, const void*, size_t>(
         io, static_cast<SendType>(&IoQueue::send), sock, buf, len);
 }
+
+auto recvmsg(IoQueue& io, int sockfd, ::msghdr* msg, int flags)
+{
+    return IoQueueAwaitable<decltype(&IoQueue::recvmsg), int, ::msghdr*, int>(
+        io, &IoQueue::recvmsg, sockfd, msg, flags);
+}
+
+auto sendmsg(IoQueue& io, int sockfd, const ::msghdr* msg, int flags)
+{
+    return IoQueueAwaitable<decltype(&IoQueue::sendmsg), int, const ::msghdr*, int>(
+        io, &IoQueue::sendmsg, sockfd, msg, flags);
+}
 }

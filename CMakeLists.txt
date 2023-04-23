@@ -44,3 +44,7 @@ set_wall(echo-udp)
 add_executable(echo-tcp-coro examples/echo-tcp-coro.cpp)
 target_link_libraries(echo-tcp-coro example-lib)
 set_wall(echo-tcp-coro)
+
+add_executable(echo-udp-coro examples/echo-udp-coro.cpp)
+target_link_libraries(echo-udp-coro example-lib)
+set_wall(echo-udp-coro)
