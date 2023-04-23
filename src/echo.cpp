@@ -4,19 +4,16 @@
 #include <spdlog/spdlog.h>
 
 #include "aiopp/ioqueue.hpp"
+#include "aiopp/socket.hpp"
 
-#include "test_common.hpp"
+#include "spdlogger.hpp"
 
 class Server {
 public:
-    Server(aiopp::IoQueue& io)
+    Server(aiopp::IoQueue& io, aiopp::Fd listenSocket)
         : io_(io)
-        , listenSocket_(createListenSocket())
+        , listenSocket_(std::move(listenSocket))
     {
-        if (listenSocket_ == -1) {
-            spdlog::critical("Could not create listen socket");
-            std::exit(1);
-        }
     }
 
     void start() { accept(); }
@@ -128,9 +125,14 @@ private:
 
 int main()
 {
+    auto socket = aiopp::createTcpListenSocket(aiopp::IpAddress::parse("0.0.0.0").value(), 4242);
+    if (socket == -1) {
+        return 1;
+    }
+
     aiopp::setLogger(std::make_unique<SpdLogger>());
     aiopp::IoQueue io;
-    Server server(io);
+    Server server(io, std::move(socket));
     server.start();
     io.run();
 }

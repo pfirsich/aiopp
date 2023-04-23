@@ -1,9 +1,8 @@
 #pragma once
 
-#include "aiopp/fd.hpp"
-#include "aiopp/log.hpp"
+#include <spdlog/spdlog.h>
 
-aiopp::Fd createListenSocket();
+#include "aiopp/log.hpp"
 
 class SpdLogger : public aiopp::LoggerBase {
 public:

@@ -18,6 +18,7 @@ set(SRC
   ioqueue.cpp
   iouring.cpp
   log.cpp
+  socket.cpp
   util.cpp
 )
 list(TRANSFORM SRC PREPEND src/)
@@ -29,7 +30,7 @@ set_wall(aiopp)
 find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
 
-add_executable(echo src/echo.cpp src/test_common.cpp)
+add_executable(echo src/echo.cpp src/spdlogger.cpp)
 target_link_libraries(echo aiopp)
 target_link_libraries(echo spdlog)
 target_link_libraries(echo fmt)
