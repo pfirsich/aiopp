@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.0.0)
 
 project(aiopp)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS on)
 
 # Define functions after add_subdirectory, so they are not overwritten
@@ -41,3 +41,9 @@ target_link_libraries(echo-udp aiopp)
 target_link_libraries(echo-udp spdlog)
 target_link_libraries(echo-udp fmt)
 set_wall(echo-udp)
+
+add_executable(echo-tcp-coro src/echo-tcp-coro.cpp src/spdlogger.cpp)
+target_link_libraries(echo-tcp-coro aiopp)
+target_link_libraries(echo-tcp-coro spdlog)
+target_link_libraries(echo-tcp-coro fmt)
+set_wall(echo-tcp-coro)
