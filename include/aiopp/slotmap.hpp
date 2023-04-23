@@ -2,7 +2,7 @@
 
 #include <queue>
 
-#include "vectormap.hpp"
+#include "aiopp/vectormap.hpp"
 
 namespace aiopp {
 template <typename T>

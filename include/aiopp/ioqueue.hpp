@@ -7,10 +7,10 @@
 
 #include <netinet/in.h>
 
-#include "events.hpp"
-#include "function.hpp"
-#include "iouring.hpp"
-#include "slotmap.hpp"
+#include "aiopp/events.hpp"
+#include "aiopp/function.hpp"
+#include "aiopp/iouring.hpp"
+#include "aiopp/slotmap.hpp"
 
 namespace aiopp {
 class IoQueue {
