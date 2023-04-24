@@ -23,17 +23,8 @@ public:
     auto operator co_await()
     {
         struct Awaiter {
-            IoQueue& io;
-            Method method;
-            std::tuple<Args...> args;
+            IoQueueAwaitable& awaitable;
             Result result = {};
-
-            Awaiter(IoQueue& io, Method method, std::tuple<Args...> args)
-                : io(io)
-                , method(method)
-                , args(std::move(args))
-            {
-            }
 
             bool await_ready() const noexcept { return false; }
 
@@ -41,18 +32,18 @@ public:
             {
                 std::apply(
                     [this, handle](auto&&... args) {
-                        (io.*method)(std::forward<decltype(args)>(args)...,
+                        (awaitable.io_.*awaitable.method_)(std::forward<decltype(args)>(args)...,
                             [this, handle](std::error_code ec, int res) {
                                 result = Result { ec, res };
                                 handle.resume();
                             });
                     },
-                    args);
+                    awaitable.args_);
             }
 
             Result await_resume() const noexcept { return result; }
         };
-        return Awaiter { io_, method_, std::move(args_) };
+        return Awaiter { *this };
     }
 
 private:
