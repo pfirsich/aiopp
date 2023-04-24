@@ -22,7 +22,7 @@ private:
         io_.recvfrom(socket_, receiveBuffer_.data(), receiveBuffer_.size(), 0, &clientAddr_,
             [this](std::error_code ec, int receivedBytes) {
                 if (ec) {
-                    spdlog::error("Error in recvmsg: {}", ec.message());
+                    spdlog::error("Error in recvfrom: {}", ec.message());
                     receive();
                     return;
                 }
@@ -37,7 +37,7 @@ private:
         io_.sendto(socket_, receiveBuffer_.data(), receiveBuffer_.size(), 0, &clientAddr_,
             [this](std::error_code ec, int /*sentBytes*/) {
                 if (ec) {
-                    spdlog::error("Error in sendmsg: {}", ec.message());
+                    spdlog::error("Error in sendto: {}", ec.message());
                 }
                 receive();
             });
