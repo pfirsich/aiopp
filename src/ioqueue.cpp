@@ -121,6 +121,49 @@ bool IoQueue::sendmsg(int sockfd, const ::msghdr* msg, int flags, HandlerEcRes c
     return addSqe(ring_.prepareSendmsg(sockfd, msg, flags), std::move(cb));
 }
 
+namespace {
+    struct MsgContext {
+        ::msghdr msg;
+        ::iovec iov;
+
+        static std::unique_ptr<MsgContext> makeContext(
+            void* buf, size_t len, ::sockaddr* addr, socklen_t addrLen)
+        {
+            auto context = std::make_unique<MsgContext>(MsgContext {
+                ::msghdr {
+                    .msg_name = addr,
+                    .msg_namelen = addrLen,
+                    .msg_iovlen = 1,
+                    .msg_controllen = 0,
+                    .msg_flags = 0,
+                },
+                ::iovec { buf, len },
+            });
+            context->msg.msg_iov = &context->iov;
+            return context;
+        }
+    };
+}
+
+bool IoQueue::recvfrom(int sockfd, void* buf, size_t len, int flags, ::sockaddr* srcAddr,
+    socklen_t addrLen, HandlerEcRes cb)
+{
+    auto context = MsgContext::makeContext(buf, len, srcAddr, addrLen);
+    return recvmsg(sockfd, &context->msg, flags,
+        [context = std::move(context), cb = std::move(cb)](
+            std::error_code ec, int result) { cb(ec, result); });
+}
+
+bool IoQueue::sendto(int sockfd, const void* buf, size_t len, int flags, const ::sockaddr* destAddr,
+    socklen_t addrLen, HandlerEcRes cb)
+{
+    auto context = MsgContext::makeContext(
+        const_cast<void*>(buf), len, const_cast<::sockaddr*>(destAddr), addrLen);
+    return sendmsg(sockfd, &context->msg, flags,
+        [context = std::move(context), cb = std::move(cb)](
+            std::error_code ec, int result) { cb(ec, result); });
+}
+
 IoQueue::NotifyHandle::NotifyHandle(std::shared_ptr<EventFd> eventFd)
     : eventFd_(std::move(eventFd))
 {

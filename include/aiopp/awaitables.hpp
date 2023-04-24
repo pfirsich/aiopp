@@ -83,4 +83,21 @@ auto sendmsg(IoQueue& io, int sockfd, const ::msghdr* msg, int flags)
     return IoQueueAwaitable<decltype(&IoQueue::sendmsg), int, const ::msghdr*, int>(
         io, &IoQueue::sendmsg, sockfd, msg, flags);
 }
+
+auto recvfrom(IoQueue& io, int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr)
+{
+    using RecvFromType
+        = bool (IoQueue::*)(int, void*, size_t, int, ::sockaddr_in*, IoQueue::HandlerEcRes);
+    return IoQueueAwaitable<RecvFromType, int, void*, size_t, int, ::sockaddr_in*>(
+        io, static_cast<RecvFromType>(&IoQueue::recvfrom), sockfd, buf, len, flags, srcAddr);
+}
+
+auto sendto(
+    IoQueue& io, int sockfd, const void* buf, size_t len, int flags, const ::sockaddr_in* destAddr)
+{
+    using SendToType = bool (IoQueue::*)(
+        int, const void*, size_t, int, const ::sockaddr_in*, IoQueue::HandlerEcRes);
+    return IoQueueAwaitable<SendToType, int, const void*, size_t, int, const ::sockaddr_in*>(
+        io, &IoQueue::sendto, sockfd, buf, len, flags, destAddr);
+}
 }

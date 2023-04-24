@@ -43,7 +43,7 @@ public:
     // cancel(RequestHandle), that generates an IORING_OP_ASYNC_CANCEL with the wrapped userData.
 
     // res argument is socket fd
-    bool accept(int fd, sockaddr_in* addr, socklen_t* addrlen, HandlerEcRes cb);
+    bool accept(int fd, ::sockaddr_in* addr, socklen_t* addrlen, HandlerEcRes cb);
 
     bool connect(int sockfd, const ::sockaddr* addr, socklen_t addrlen, HandlerEc cb);
 
@@ -71,6 +71,30 @@ public:
     bool recvmsg(int sockfd, ::msghdr* msg, int flags, HandlerEcRes cb);
 
     bool sendmsg(int sockfd, const ::msghdr* msg, int flags, HandlerEcRes cb);
+
+    // These functions are just convenience wrappers on top of recvmsg and sendmsg.
+    // They need to wrap the callback and allocate a ::msghdr and ::iovec on the heap.
+    // This is also why addrLen is not an in-out parameter, but just an in-parameter.
+    // If you need it to be fast, use recvmsg and sendmsg.
+    bool recvfrom(int sockfd, void* buf, size_t len, int flags, ::sockaddr* srcAddr,
+        socklen_t addrLen, HandlerEcRes cb);
+
+    bool recvfrom(
+        int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr, HandlerEcRes cb)
+    {
+        return recvfrom(sockfd, buf, len, flags, reinterpret_cast<::sockaddr*>(srcAddr),
+            sizeof(::sockaddr_in), std::move(cb));
+    }
+
+    bool sendto(int sockfd, const void* buf, size_t len, int flags, const ::sockaddr* destAddr,
+        socklen_t addrLen, HandlerEcRes cb);
+
+    bool sendto(int sockfd, const void* buf, size_t len, int flags, const ::sockaddr_in* destAddr,
+        HandlerEcRes cb)
+    {
+        return sendto(sockfd, buf, len, flags, reinterpret_cast<const ::sockaddr*>(destAddr),
+            sizeof(::sockaddr_in), std::move(cb));
+    }
 
     class NotifyHandle {
     public:
