@@ -16,7 +16,7 @@ BasicCoroutine serve(IoQueue& io, const Fd& socket)
         const auto [recvEc, receivedBytes] = co_await recvfrom(
             io, socket, receiveBuffer.data(), receiveBuffer.size(), 0, &clientAddr);
         if (recvEc) {
-            spdlog::error("Error in recvmsg: {}", recvEc.message());
+            spdlog::error("Error in recvfrom: {}", recvEc.message());
             continue;
         }
         receiveBuffer.resize(receivedBytes);
@@ -24,7 +24,7 @@ BasicCoroutine serve(IoQueue& io, const Fd& socket)
         const auto [sendEc, sentBytes] = co_await sendto(
             io, socket, receiveBuffer.data(), receiveBuffer.size(), 0, &clientAddr);
         if (sendEc) {
-            spdlog::error("Error in sendmsg: {}", sendEc.message());
+            spdlog::error("Error in sendto: {}", sendEc.message());
             continue;
         }
     }
