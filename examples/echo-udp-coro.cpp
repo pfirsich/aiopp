@@ -13,25 +13,16 @@ BasicCoroutine serve(IoQueue& io, const Fd& socket)
     while (true) {
         std::string receiveBuffer(1024, '\0');
         ::sockaddr_in clientAddr;
-        ::iovec iov { receiveBuffer.data(), receiveBuffer.size() };
-        ::msghdr msg {
-            .msg_name = &clientAddr,
-            .msg_namelen = sizeof(clientAddr),
-            .msg_iov = &iov,
-            .msg_iovlen = 1,
-            .msg_control = nullptr,
-            .msg_controllen = 0,
-            .msg_flags = 0,
-        };
-        const auto [recvEc, receivedBytes] = co_await recvmsg(io, socket, &msg, 0);
+        const auto [recvEc, receivedBytes] = co_await recvfrom(
+            io, socket, receiveBuffer.data(), receiveBuffer.size(), 0, &clientAddr);
         if (recvEc) {
             spdlog::error("Error in recvmsg: {}", recvEc.message());
             continue;
         }
         receiveBuffer.resize(receivedBytes);
 
-        iov = ::iovec { receiveBuffer.data(), receiveBuffer.size() };
-        const auto [sendEc, sentBytes] = co_await sendmsg(io, socket, &msg, 0);
+        const auto [sendEc, sentBytes] = co_await sendto(
+            io, socket, receiveBuffer.data(), receiveBuffer.size(), 0, &clientAddr);
         if (sendEc) {
             spdlog::error("Error in sendmsg: {}", sendEc.message());
             continue;
