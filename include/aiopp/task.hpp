@@ -3,7 +3,7 @@
 #include <coroutine>
 
 template <typename Result = void>
-class Task {
+class [[nodiscard]] Task {
 public:
     struct FinalAwaiter {
         bool await_ready() const noexcept { return false; }
