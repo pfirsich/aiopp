@@ -26,7 +26,6 @@ void IoQueue::setAbsoluteTimeout(Timespec* ts, uint64_t milliseconds)
 }
 
 IoQueue::IoQueue(size_t size, bool submissionQueuePolling)
-    : completionHandlers_(size)
 {
     if (!ring_.init(size, submissionQueuePolling)) {
         getLogger().log(LogSeverity::Fatal, "Could not create io_uring: " + errnoToString(errno));
@@ -199,7 +198,7 @@ IoQueue::NotifyHandle IoQueue::wait(Function<void(std::error_code, uint64_t)> cb
 
 void IoQueue::run()
 {
-    while (completionHandlers_.size() > 0) {
+    while (numOpsQueued_ > 0) {
         const auto res = ring_.submitSqes(1);
         if (res < 0) {
             getLogger().log(LogSeverity::Error, "Error submitting SQEs: " + errnoToString(errno));
@@ -210,12 +209,11 @@ void IoQueue::run()
             continue;
         }
 
-        if (cqe->user_data != Ignore) {
-            assert(completionHandlers_.contains(cqe->user_data));
-            metrics_.ioOperationsQueued--;
-            auto ch = std::move(completionHandlers_[cqe->user_data]);
-            ch(IoResult(cqe->res));
-            completionHandlers_.remove(cqe->user_data);
+        if (cqe->user_data != UserDataIgnore) {
+            const auto completer = reinterpret_cast<CallbackCompleter*>(cqe->user_data);
+            completer->handler(IoResult(cqe->res));
+            delete completer;
+            numOpsQueued_--;
         }
         ring_.advanceCq();
     }
@@ -227,8 +225,8 @@ bool IoQueue::addSqe(io_uring_sqe* sqe, CompletionHandler cb)
         getLogger().log(LogSeverity::Warning, "io_uring full");
         return false;
     }
-    metrics_.ioOperationsQueued++;
-    sqe->user_data = completionHandlers_.emplace(std::move(cb));
+    numOpsQueued_++;
+    sqe->user_data = reinterpret_cast<uint64_t>(new CallbackCompleter { std::move(cb) });
     return true;
 }
 
@@ -242,7 +240,7 @@ bool IoQueue::addSqe(
     // If the timeout does not fit into the SQ, that's fine. We don't want to undo the whole thing.
     // In the future the use of timeouts might be more critical and this should be reconsidered.
     auto timeoutSqe = ring_.prepareLinkTimeout(timeout, timeoutIsAbsolute ? IORING_TIMEOUT_ABS : 0);
-    timeoutSqe->user_data = Ignore;
+    timeoutSqe->user_data = UserDataIgnore;
     return true;
 }
 }

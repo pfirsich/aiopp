@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <future>
 #include <limits>
 #include <system_error>
@@ -10,7 +11,6 @@
 #include "aiopp/events.hpp"
 #include "aiopp/function.hpp"
 #include "aiopp/iouring.hpp"
-#include "aiopp/slotmap.hpp"
 
 namespace aiopp {
 struct IoResult {
@@ -43,15 +43,12 @@ private:
 };
 
 class IoQueue {
-    static constexpr auto Ignore = std::numeric_limits<uint64_t>::max();
+    static constexpr auto UserDataInvalid = 0;
+    static constexpr auto UserDataIgnore = std::numeric_limits<uint64_t>::max();
 
 public:
     using Timespec = IoURing::Timespec;
     using CompletionHandler = Function<void(IoResult)>;
-
-    struct Metrics {
-        std::atomic<uint32_t> ioOperationsQueued;
-    };
 
     // These are both relative with respect to their arguments, but naming these is hard.
     static void setRelativeTimeout(Timespec* ts, uint64_t milliseconds);
@@ -174,14 +171,17 @@ public:
 
     void run();
 
-    const Metrics& getMetrics() const;
+    size_t getNumOpsQueued() const { return numOpsQueued_; }
 
 private:
+    struct CallbackCompleter {
+        CompletionHandler handler;
+    };
+
     bool addSqe(io_uring_sqe* sqe, CompletionHandler cb);
     bool addSqe(io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, CompletionHandler cb);
 
     IoURing ring_;
-    SlotMap<CompletionHandler> completionHandlers_;
-    Metrics metrics_;
+    size_t numOpsQueued_ = 0;
 };
 }
