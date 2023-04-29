@@ -39,11 +39,15 @@ public:
         return *this;
     }
 
-    Function& operator=(std::nullptr_t) { callable_.reset(); }
+    Function& operator=(std::nullptr_t)
+    {
+        callable_.reset();
+        return *this;
+    }
 
     Function& operator=(const Function&) = delete;
 
-    explicit operator bool() const { return callable_; }
+    explicit operator bool() const { return callable_ != nullptr; }
 
     Ret operator()(Args... args) const
     {
