@@ -14,18 +14,18 @@ Task<std::pair<std::error_code, bool>> sendAll(
 {
     size_t offset = 0;
     while (offset < buffer.size()) {
-        const auto [ec, sentBytes]
+        const auto sentBytes
             = co_await send(io, socket, buffer.data() + offset, buffer.size() - offset);
-        if (ec) {
-            spdlog::error("Error in send: {}", ec.message());
-            co_return std::make_pair(ec, false);
+        if (!sentBytes) {
+            spdlog::error("Error in send: {}", sentBytes.error().message());
+            co_return std::make_pair(sentBytes.error(), false);
         }
 
-        if (sentBytes == 0) { // Connection closed
-            co_return std::make_pair(ec, true);
+        if (*sentBytes == 0) { // Connection closed
+            co_return std::make_pair(std::error_code {}, true);
         }
 
-        offset += sentBytes;
+        offset += *sentBytes;
     }
     co_return std::make_pair(std::error_code {}, false);
 }
@@ -34,35 +34,35 @@ BasicCoroutine echo(IoQueue& io, Fd socket)
 {
     while (true) {
         std::string recvBuffer(1024, '\0');
-        const auto [ec, receivedBytes]
-            = co_await recv(io, socket, recvBuffer.data(), recvBuffer.size());
-        if (ec) {
-            spdlog::error("Error in receive: {}", ec.message());
+        const auto receivedBytes = co_await recv(io, socket, recvBuffer.data(), recvBuffer.size());
+        if (!receivedBytes) {
+            spdlog::error("Error in receive: {}", receivedBytes.error().message());
             break;
         }
 
-        if (receivedBytes == 0) { // Connection closed
+        if (*receivedBytes == 0) { // Connection closed
             break;
         }
 
-        recvBuffer.resize(receivedBytes);
+        recvBuffer.resize(*receivedBytes);
 
         const auto [sendEc, eof] = co_await sendAll(io, socket, recvBuffer);
         if (sendEc || eof) {
             break;
         }
     }
+    co_await close(io, socket.release());
 }
 
 BasicCoroutine serve(IoQueue& io, Fd&& listenSocket)
 {
     while (true) {
-        const auto [ec, fd] = co_await accept(io, listenSocket, nullptr, nullptr);
-        if (ec) {
-            spdlog::error("Error in accept: {}", ec.message());
+        const auto fd = co_await accept(io, listenSocket, nullptr, nullptr);
+        if (!fd) {
+            spdlog::error("Error in accept: {}", fd.error().message());
             continue;
         }
-        echo(io, Fd { fd });
+        echo(io, Fd { *fd });
     }
 }
 

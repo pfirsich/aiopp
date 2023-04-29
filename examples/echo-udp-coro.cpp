@@ -13,18 +13,18 @@ BasicCoroutine serve(IoQueue& io, const Fd& socket)
     while (true) {
         std::string receiveBuffer(1024, '\0');
         ::sockaddr_in clientAddr;
-        const auto [recvEc, receivedBytes] = co_await recvfrom(
+        const auto receivedBytes = co_await recvfrom(
             io, socket, receiveBuffer.data(), receiveBuffer.size(), 0, &clientAddr);
-        if (recvEc) {
-            spdlog::error("Error in recvfrom: {}", recvEc.message());
+        if (!receivedBytes) {
+            spdlog::error("Error in recvfrom: {}", receivedBytes.error().message());
             continue;
         }
-        receiveBuffer.resize(receivedBytes);
+        receiveBuffer.resize(*receivedBytes);
 
-        const auto [sendEc, sentBytes] = co_await sendto(
+        const auto sentBytes = co_await sendto(
             io, socket, receiveBuffer.data(), receiveBuffer.size(), 0, &clientAddr);
-        if (sendEc) {
-            spdlog::error("Error in sendto: {}", sendEc.message());
+        if (!sentBytes) {
+            spdlog::error("Error in sendto: {}", sentBytes.error().message());
             continue;
         }
     }

@@ -8,11 +8,6 @@ namespace aiopp {
 template <typename Method, typename... Args>
 class IoQueueAwaitable {
 public:
-    struct Result {
-        std::error_code ec;
-        int result;
-    };
-
     IoQueueAwaitable(IoQueue& io, Method method, Args... args)
         : io_(io)
         , method_(method)
@@ -24,7 +19,7 @@ public:
     {
         struct Awaiter {
             IoQueueAwaitable& awaitable;
-            Result result = {};
+            IoResult result = {};
 
             bool await_ready() const noexcept { return false; }
 
@@ -32,16 +27,16 @@ public:
             {
                 std::apply(
                     [this, handle](auto&&... args) {
-                        (awaitable.io_.*awaitable.method_)(std::forward<decltype(args)>(args)...,
-                            [this, handle](std::error_code ec, int res) {
-                                result = Result { ec, res };
+                        (awaitable.io_.*awaitable.method_)(
+                            std::forward<decltype(args)>(args)..., [this, handle](IoResult res) {
+                                result = res;
                                 handle.resume();
                             });
                     },
                     awaitable.args_);
             }
 
-            Result await_resume() const noexcept { return result; }
+            IoResult await_resume() const noexcept { return result; }
         };
         return Awaiter { *this };
     }
@@ -54,20 +49,22 @@ private:
 
 auto accept(IoQueue& io, int fd, ::sockaddr_in* addr, ::socklen_t* addrLen)
 {
-    return IoQueueAwaitable<decltype(&IoQueue::accept), int, ::sockaddr_in*, ::socklen_t*>(
-        io, &IoQueue::accept, fd, addr, addrLen);
+    using AcceptType
+        = bool (IoQueue::*)(int, ::sockaddr_in*, socklen_t*, IoQueue::CompletionHandler);
+    return IoQueueAwaitable<AcceptType, int, ::sockaddr_in*, ::socklen_t*>(
+        io, static_cast<AcceptType>(&IoQueue::accept), fd, addr, addrLen);
 }
 
 auto recv(IoQueue& io, int sock, void* buf, size_t len)
 {
-    using RecvType = bool (IoQueue::*)(int, void*, size_t, IoQueue::HandlerEcRes);
+    using RecvType = bool (IoQueue::*)(int, void*, size_t, IoQueue::CompletionHandler);
     return IoQueueAwaitable<RecvType, int, void*, size_t>(
         io, static_cast<RecvType>(&IoQueue::recv), sock, buf, len);
 }
 
 auto send(IoQueue& io, int sock, const void* buf, size_t len)
 {
-    using SendType = bool (IoQueue::*)(int, const void*, size_t, IoQueue::HandlerEcRes);
+    using SendType = bool (IoQueue::*)(int, const void*, size_t, IoQueue::CompletionHandler);
     return IoQueueAwaitable<SendType, int, const void*, size_t>(
         io, static_cast<SendType>(&IoQueue::send), sock, buf, len);
 }
@@ -87,7 +84,7 @@ auto sendmsg(IoQueue& io, int sockfd, const ::msghdr* msg, int flags)
 auto recvfrom(IoQueue& io, int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr)
 {
     using RecvFromType
-        = bool (IoQueue::*)(int, void*, size_t, int, ::sockaddr_in*, IoQueue::HandlerEcRes);
+        = bool (IoQueue::*)(int, void*, size_t, int, ::sockaddr_in*, IoQueue::CompletionHandler);
     return IoQueueAwaitable<RecvFromType, int, void*, size_t, int, ::sockaddr_in*>(
         io, static_cast<RecvFromType>(&IoQueue::recvfrom), sockfd, buf, len, flags, srcAddr);
 }
@@ -96,8 +93,14 @@ auto sendto(
     IoQueue& io, int sockfd, const void* buf, size_t len, int flags, const ::sockaddr_in* destAddr)
 {
     using SendToType = bool (IoQueue::*)(
-        int, const void*, size_t, int, const ::sockaddr_in*, IoQueue::HandlerEcRes);
+        int, const void*, size_t, int, const ::sockaddr_in*, IoQueue::CompletionHandler);
     return IoQueueAwaitable<SendToType, int, const void*, size_t, int, const ::sockaddr_in*>(
         io, &IoQueue::sendto, sockfd, buf, len, flags, destAddr);
+}
+
+auto close(IoQueue& io, int fd)
+{
+    using CloseType = bool (IoQueue::*)(int, IoQueue::CompletionHandler);
+    return IoQueueAwaitable<CloseType, int>(io, &IoQueue::close, fd);
 }
 }

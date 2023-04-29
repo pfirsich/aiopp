@@ -17,16 +17,16 @@ EventFd::EventFd(IoQueue& io)
 bool EventFd::read(Function<void(std::error_code, uint64_t)> cb)
 {
     assert(fd_ != -1);
-    return io_.read(fd_, &readBuf_, sizeof(readBuf_),
-        [this, cb = std::move(cb)](std::error_code ec, int readBytes) {
-            if (ec) {
-                cb(ec, 0);
+    return io_.read(
+        fd_, &readBuf_, sizeof(readBuf_), [this, cb = std::move(cb)](IoResult readBytes) {
+            if (!readBytes) {
+                cb(readBytes.error(), 0);
                 return;
             }
             // man 2 eventfd: Each successful read(2) returns an 8-byte integer.
             // The example does handle the case of res != 8, but I don't really know
             // what I am not sure what I should do in that case, so I assert for now.
-            assert(readBytes == sizeof(uint64_t));
+            assert(*readBytes == sizeof(uint64_t));
             cb(std::error_code(), readBuf_);
         });
 }

@@ -13,20 +13,45 @@
 #include "aiopp/slotmap.hpp"
 
 namespace aiopp {
-class IoQueue {
-private:
-    using CompletionHandler = Function<void(const io_uring_cqe*)>;
+struct IoResult {
+public:
+    IoResult() = default;
 
+    IoResult(int res)
+        : result_(res)
+    {
+    }
+
+    std::error_code error() const
+    {
+        assert(result_ < 0 && result_ != std::numeric_limits<int>::min());
+        return std::make_error_code(static_cast<std::errc>(result_));
+    }
+
+    int result() const
+    {
+        assert(result_ >= 0);
+        return result_;
+    }
+
+    int operator*() const { return result(); }
+
+    explicit operator bool() const { return result_ >= 0; }
+
+private:
+    int result_ = std::numeric_limits<int>::min(); // not a valid errno
+};
+
+class IoQueue {
     static constexpr auto Ignore = std::numeric_limits<uint64_t>::max();
 
 public:
+    using Timespec = IoURing::Timespec;
+    using CompletionHandler = Function<void(IoResult)>;
+
     struct Metrics {
         std::atomic<uint32_t> ioOperationsQueued;
     };
-
-    using HandlerEc = Function<void(std::error_code ec)>;
-    using HandlerEcRes = Function<void(std::error_code ec, int res)>;
-    using Timespec = IoURing::Timespec;
 
     // These are both relative with respect to their arguments, but naming these is hard.
     static void setRelativeTimeout(Timespec* ts, uint64_t milliseconds);
@@ -42,55 +67,54 @@ public:
     // SQE userData. Add an operator bool to replicate the old behaviour and add
     // cancel(RequestHandle), that generates an IORING_OP_ASYNC_CANCEL with the wrapped userData.
 
-    // res argument is socket fd
-    bool accept(int fd, ::sockaddr_in* addr, socklen_t* addrlen, HandlerEcRes cb);
+    bool accept(int fd, ::sockaddr_in* addr, socklen_t* addrlen, CompletionHandler cb);
 
-    bool connect(int sockfd, const ::sockaddr* addr, socklen_t addrlen, HandlerEc cb);
+    bool connect(int sockfd, const ::sockaddr* addr, socklen_t addrlen, CompletionHandler cb);
 
     // res argument is sent bytes
-    bool send(int sockfd, const void* buf, size_t len, HandlerEcRes cb);
+    bool send(int sockfd, const void* buf, size_t len, CompletionHandler cb);
 
     // timeout may be nullptr for convenience (which is equivalent to the function above)
     bool send(int sockfd, const void* buf, size_t len, Timespec* timeout, bool timeoutIsAbsolute,
-        HandlerEcRes cb);
+        CompletionHandler cb);
 
     // res argument is received bytes
-    bool recv(int sockfd, void* buf, size_t len, HandlerEcRes cb);
+    bool recv(int sockfd, void* buf, size_t len, CompletionHandler cb);
 
     bool recv(int sockfd, void* buf, size_t len, Timespec* timeout, bool timeoutIsAbsolute,
-        HandlerEcRes cb);
+        CompletionHandler cb);
 
-    bool read(int fd, void* buf, size_t count, HandlerEcRes cb);
+    bool read(int fd, void* buf, size_t count, CompletionHandler cb);
 
-    bool close(int fd, HandlerEc cb);
+    bool close(int fd, CompletionHandler cb);
 
-    bool shutdown(int fd, int how, HandlerEc cb);
+    bool shutdown(int fd, int how, CompletionHandler cb);
 
-    bool poll(int fd, short events, HandlerEcRes cb);
+    bool poll(int fd, short events, CompletionHandler cb);
 
-    bool recvmsg(int sockfd, ::msghdr* msg, int flags, HandlerEcRes cb);
+    bool recvmsg(int sockfd, ::msghdr* msg, int flags, CompletionHandler cb);
 
-    bool sendmsg(int sockfd, const ::msghdr* msg, int flags, HandlerEcRes cb);
+    bool sendmsg(int sockfd, const ::msghdr* msg, int flags, CompletionHandler cb);
 
     // These functions are just convenience wrappers on top of recvmsg and sendmsg.
     // They need to wrap the callback and allocate a ::msghdr and ::iovec on the heap.
     // This is also why addrLen is not an in-out parameter, but just an in-parameter.
     // If you need it to be fast, use recvmsg and sendmsg.
     bool recvfrom(int sockfd, void* buf, size_t len, int flags, ::sockaddr* srcAddr,
-        socklen_t addrLen, HandlerEcRes cb);
+        socklen_t addrLen, CompletionHandler cb);
 
     bool recvfrom(
-        int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr, HandlerEcRes cb)
+        int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr, CompletionHandler cb)
     {
         return recvfrom(sockfd, buf, len, flags, reinterpret_cast<::sockaddr*>(srcAddr),
             sizeof(::sockaddr_in), std::move(cb));
     }
 
     bool sendto(int sockfd, const void* buf, size_t len, int flags, const ::sockaddr* destAddr,
-        socklen_t addrLen, HandlerEcRes cb);
+        socklen_t addrLen, CompletionHandler cb);
 
     bool sendto(int sockfd, const void* buf, size_t len, int flags, const ::sockaddr_in* destAddr,
-        HandlerEcRes cb)
+        CompletionHandler cb)
     {
         return sendto(sockfd, buf, len, flags, reinterpret_cast<const ::sockaddr*>(destAddr),
             sizeof(::sockaddr_in), std::move(cb));
@@ -153,14 +177,8 @@ public:
     const Metrics& getMetrics() const;
 
 private:
-    size_t addHandler(HandlerEc&& cb);
-    size_t addHandler(HandlerEcRes&& cb);
-
-    template <typename Callback>
-    bool addSqe(io_uring_sqe* sqe, Callback cb);
-
-    template <typename Callback>
-    bool addSqe(io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, Callback cb);
+    bool addSqe(io_uring_sqe* sqe, CompletionHandler cb);
+    bool addSqe(io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, CompletionHandler cb);
 
     IoURing ring_;
     SlotMap<CompletionHandler> completionHandlers_;

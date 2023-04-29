@@ -52,24 +52,24 @@ size_t IoQueue::getCapacity() const
     return ring_.getSqeCapacity();
 }
 
-bool IoQueue::accept(int fd, sockaddr_in* addr, socklen_t* addrlen, HandlerEcRes cb)
+bool IoQueue::accept(int fd, ::sockaddr_in* addr, socklen_t* addrlen, CompletionHandler cb)
 {
     return addSqe(
         ring_.prepareAccept(fd, reinterpret_cast<sockaddr*>(addr), addrlen), std::move(cb));
 }
 
-bool IoQueue::connect(int sockfd, const ::sockaddr* addr, socklen_t addrlen, HandlerEc cb)
+bool IoQueue::connect(int sockfd, const ::sockaddr* addr, socklen_t addrlen, CompletionHandler cb)
 {
     return addSqe(ring_.prepareConnect(sockfd, addr, addrlen), std::move(cb));
 }
 
-bool IoQueue::send(int sockfd, const void* buf, size_t len, HandlerEcRes cb)
+bool IoQueue::send(int sockfd, const void* buf, size_t len, CompletionHandler cb)
 {
     return addSqe(ring_.prepareSend(sockfd, buf, len), std::move(cb));
 }
 
 bool IoQueue::send(int sockfd, const void* buf, size_t len, IoQueue::Timespec* timeout,
-    bool timeoutIsAbsolute, HandlerEcRes cb)
+    bool timeoutIsAbsolute, CompletionHandler cb)
 {
     if (!timeout) {
         return send(sockfd, buf, len, std::move(cb));
@@ -77,13 +77,13 @@ bool IoQueue::send(int sockfd, const void* buf, size_t len, IoQueue::Timespec* t
     return addSqe(ring_.prepareSend(sockfd, buf, len), timeout, timeoutIsAbsolute, std::move(cb));
 }
 
-bool IoQueue::recv(int sockfd, void* buf, size_t len, HandlerEcRes cb)
+bool IoQueue::recv(int sockfd, void* buf, size_t len, CompletionHandler cb)
 {
     return addSqe(ring_.prepareRecv(sockfd, buf, len), std::move(cb));
 }
 
 bool IoQueue::recv(int sockfd, void* buf, size_t len, IoQueue::Timespec* timeout,
-    bool timeoutIsAbsolute, HandlerEcRes cb)
+    bool timeoutIsAbsolute, CompletionHandler cb)
 {
     if (!timeout) {
         return recv(sockfd, buf, len, std::move(cb));
@@ -91,32 +91,32 @@ bool IoQueue::recv(int sockfd, void* buf, size_t len, IoQueue::Timespec* timeout
     return addSqe(ring_.prepareRecv(sockfd, buf, len), timeout, timeoutIsAbsolute, std::move(cb));
 }
 
-bool IoQueue::read(int fd, void* buf, size_t count, HandlerEcRes cb)
+bool IoQueue::read(int fd, void* buf, size_t count, CompletionHandler cb)
 {
     return addSqe(ring_.prepareRead(fd, buf, count), std::move(cb));
 }
 
-bool IoQueue::close(int fd, HandlerEc cb)
+bool IoQueue::close(int fd, CompletionHandler cb)
 {
     return addSqe(ring_.prepareClose(fd), std::move(cb));
 }
 
-bool IoQueue::shutdown(int fd, int how, HandlerEc cb)
+bool IoQueue::shutdown(int fd, int how, CompletionHandler cb)
 {
     return addSqe(ring_.prepareShutdown(fd, how), std::move(cb));
 }
 
-bool IoQueue::poll(int fd, short events, HandlerEcRes cb)
+bool IoQueue::poll(int fd, short events, CompletionHandler cb)
 {
     return addSqe(ring_.preparePollAdd(fd, events), std::move(cb));
 }
 
-bool IoQueue::recvmsg(int sockfd, ::msghdr* msg, int flags, HandlerEcRes cb)
+bool IoQueue::recvmsg(int sockfd, ::msghdr* msg, int flags, CompletionHandler cb)
 {
     return addSqe(ring_.prepareRecvmsg(sockfd, msg, flags), std::move(cb));
 }
 
-bool IoQueue::sendmsg(int sockfd, const ::msghdr* msg, int flags, HandlerEcRes cb)
+bool IoQueue::sendmsg(int sockfd, const ::msghdr* msg, int flags, CompletionHandler cb)
 {
     return addSqe(ring_.prepareSendmsg(sockfd, msg, flags), std::move(cb));
 }
@@ -146,22 +146,20 @@ namespace {
 }
 
 bool IoQueue::recvfrom(int sockfd, void* buf, size_t len, int flags, ::sockaddr* srcAddr,
-    socklen_t addrLen, HandlerEcRes cb)
+    socklen_t addrLen, CompletionHandler cb)
 {
     auto context = MsgContext::makeContext(buf, len, srcAddr, addrLen);
     return recvmsg(sockfd, &context->msg, flags,
-        [context = std::move(context), cb = std::move(cb)](
-            std::error_code ec, int result) { cb(ec, result); });
+        [context = std::move(context), cb = std::move(cb)](IoResult res) { cb(res); });
 }
 
 bool IoQueue::sendto(int sockfd, const void* buf, size_t len, int flags, const ::sockaddr* destAddr,
-    socklen_t addrLen, HandlerEcRes cb)
+    socklen_t addrLen, CompletionHandler cb)
 {
     auto context = MsgContext::makeContext(
         const_cast<void*>(buf), len, const_cast<::sockaddr*>(destAddr), addrLen);
     return sendmsg(sockfd, &context->msg, flags,
-        [context = std::move(context), cb = std::move(cb)](
-            std::error_code ec, int result) { cb(ec, result); });
+        [context = std::move(context), cb = std::move(cb)](IoResult res) { cb(res); });
 }
 
 IoQueue::NotifyHandle::NotifyHandle(std::shared_ptr<EventFd> eventFd)
@@ -216,52 +214,26 @@ void IoQueue::run()
             assert(completionHandlers_.contains(cqe->user_data));
             metrics_.ioOperationsQueued--;
             auto ch = std::move(completionHandlers_[cqe->user_data]);
-            ch(cqe);
+            ch(IoResult(cqe->res));
             completionHandlers_.remove(cqe->user_data);
         }
         ring_.advanceCq();
     }
 }
 
-size_t IoQueue::addHandler(HandlerEc&& cb)
-{
-    return completionHandlers_.emplace([cb = std::move(cb)](const io_uring_cqe* cqe) {
-        if (cqe->res < 0) {
-            cb(std::make_error_code(static_cast<std::errc>(-cqe->res)));
-        } else {
-            cb(std::error_code());
-        }
-    });
-}
-
-size_t IoQueue::addHandler(HandlerEcRes&& cb)
-{
-    return completionHandlers_.emplace([cb = std::move(cb)](const io_uring_cqe* cqe) {
-        if (cqe->res < 0) {
-            cb(std::make_error_code(static_cast<std::errc>(-cqe->res)), -1);
-        } else {
-            cb(std::error_code(), cqe->res);
-        }
-    });
-}
-
-template <typename Callback>
-bool IoQueue::addSqe(io_uring_sqe* sqe, Callback cb)
+bool IoQueue::addSqe(io_uring_sqe* sqe, CompletionHandler cb)
 {
     if (!sqe) {
         getLogger().log(LogSeverity::Warning, "io_uring full");
         return false;
     }
     metrics_.ioOperationsQueued++;
-    sqe->user_data = addHandler(std::move(cb));
+    sqe->user_data = completionHandlers_.emplace(std::move(cb));
     return true;
 }
 
-template bool IoQueue::addSqe<IoQueue::HandlerEc>(io_uring_sqe* sqe, IoQueue::HandlerEc cb);
-template bool IoQueue::addSqe<IoQueue::HandlerEcRes>(io_uring_sqe* sqe, IoQueue::HandlerEcRes cb);
-
-template <typename Callback>
-bool IoQueue::addSqe(io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, Callback cb)
+bool IoQueue::addSqe(
+    io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, CompletionHandler cb)
 {
     if (!addSqe(sqe, std::move(cb))) {
         return false;
@@ -273,9 +245,4 @@ bool IoQueue::addSqe(io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolut
     timeoutSqe->user_data = Ignore;
     return true;
 }
-
-template bool IoQueue::addSqe<IoQueue::HandlerEc>(
-    io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, IoQueue::HandlerEc cb);
-template bool IoQueue::addSqe<IoQueue::HandlerEcRes>(
-    io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, IoQueue::HandlerEcRes cb);
 }
