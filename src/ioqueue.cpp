@@ -161,41 +161,6 @@ bool IoQueue::sendto(int sockfd, const void* buf, size_t len, int flags, const :
         [context = std::move(context), cb = std::move(cb)](IoResult res) { cb(res); });
 }
 
-IoQueue::NotifyHandle::NotifyHandle(std::shared_ptr<EventFd> eventFd)
-    : eventFd_(std::move(eventFd))
-{
-}
-
-IoQueue::NotifyHandle::operator bool() const
-{
-    return eventFd_ != nullptr;
-}
-
-void IoQueue::NotifyHandle::notify(uint64_t value)
-{
-    assert(eventFd_);
-    eventFd_->write(value);
-    eventFd_.reset();
-}
-
-IoQueue::NotifyHandle IoQueue::wait(Function<void(std::error_code, uint64_t)> cb)
-{
-    auto eventFd = std::make_shared<EventFd>(*this);
-    const auto res
-        = eventFd->read([eventFd, cb = std::move(cb)](std::error_code ec, uint64_t value) {
-              if (ec) {
-                  cb(ec, 0);
-              } else {
-                  cb(std::error_code(), value);
-              }
-          });
-    if (res) {
-        return NotifyHandle { std::move(eventFd) };
-    } else {
-        return NotifyHandle { nullptr };
-    }
-}
-
 void IoQueue::run()
 {
     while (numOpsQueued_ > 0) {

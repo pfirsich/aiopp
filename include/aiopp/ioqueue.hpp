@@ -8,7 +8,6 @@
 
 #include <netinet/in.h>
 
-#include "aiopp/events.hpp"
 #include "aiopp/function.hpp"
 #include "aiopp/iouring.hpp"
 
@@ -117,57 +116,6 @@ public:
             sizeof(::sockaddr_in), std::move(cb));
     }
 
-    class NotifyHandle {
-    public:
-        NotifyHandle(std::shared_ptr<EventFd> eventFd);
-
-        // wait might fail, in which case this will return false
-        explicit operator bool() const;
-
-        // Note that all restrictions on EventFd::write apply here as well (writes synchronously, so
-        // don't use from the main thread, but can be used from other threads).
-        // Also this function must be called exactly once. If it is not called, the async read on
-        // the eventfd will never terminate. If you call it more than once, there is no read queued
-        // up, so this function will abort.
-        void notify(uint64_t value = 1);
-
-    private:
-        // We need shared ownership, because wait will issue an async read, which needs to have
-        // ownership of this event fd as well.
-        std::shared_ptr<EventFd> eventFd_;
-    };
-
-    // This will call a handler callback, when the NotifyHandle is notified.
-    // The value passed to NotifyHandle::notify will be passed to the handler cb.
-    NotifyHandle wait(Function<void(std::error_code, uint64_t)> cb);
-
-    template <typename Result>
-    bool async(Function<Result()> func, Function<void(std::error_code, Result&&)> cb)
-    {
-        // Only a minimal amount of hair has been ripped out of my skull because of this.
-        std::promise<Result> prom;
-        auto handle = wait(
-            [fut = prom.get_future(), cb = std::move(cb)](std::error_code ec, uint64_t) mutable {
-                if (ec) {
-                    cb(ec, Result());
-                } else {
-                    cb(std::error_code(), std::move(fut.get()));
-                }
-            });
-        if (!handle) {
-            return false;
-        }
-
-        // Simply detaching a thread is really not very clean, but it's easy and enough for my
-        // current use cases.
-        std::thread t(
-            [func = std::move(func), prom = std::move(prom), handle = std::move(handle)]() mutable {
-                prom.set_value(func());
-                handle.notify();
-            });
-        t.detach();
-        return true;
-    }
 
     void run();
 

@@ -48,4 +48,39 @@ void EventFd::write(uint64_t v)
         std::exit(1);
     }
 }
+
+NotifyHandle::NotifyHandle(std::shared_ptr<EventFd> eventFd)
+    : eventFd_(std::move(eventFd))
+{
+}
+
+NotifyHandle::operator bool() const
+{
+    return eventFd_ != nullptr;
+}
+
+void NotifyHandle::notify(uint64_t value)
+{
+    assert(eventFd_);
+    eventFd_->write(value);
+    eventFd_.reset();
+}
+
+NotifyHandle wait(IoQueue& io, Function<void(std::error_code, uint64_t)> cb)
+{
+    auto eventFd = std::make_shared<EventFd>(io);
+    const auto res
+        = eventFd->read([eventFd, cb = std::move(cb)](std::error_code ec, uint64_t value) {
+              if (ec) {
+                  cb(ec, 0);
+              } else {
+                  cb(std::error_code(), value);
+              }
+          });
+    if (res) {
+        return NotifyHandle { std::move(eventFd) };
+    } else {
+        return NotifyHandle { nullptr };
+    }
+}
 }
