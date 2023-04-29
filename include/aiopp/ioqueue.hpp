@@ -49,6 +49,13 @@ public:
     using Timespec = IoURing::Timespec;
     using CompletionHandler = Function<void(IoResult)>;
 
+    struct OperationHandle {
+        uint64_t userData = UserDataInvalid;
+
+        bool valid() const { return userData != UserDataInvalid; }
+        explicit operator bool() const { return valid(); }
+    };
+
     // These are both relative with respect to their arguments, but naming these is hard.
     static void setRelativeTimeout(Timespec* ts, uint64_t milliseconds);
     static void setAbsoluteTimeout(Timespec* ts, uint64_t milliseconds);
@@ -59,63 +66,66 @@ public:
 
     size_t getCapacity() const;
 
-    // TODO: Support cancellation by returning a RequestHandle wrapping an uint64_t containing the
-    // SQE userData. Add an operator bool to replicate the old behaviour and add
-    // cancel(RequestHandle), that generates an IORING_OP_ASYNC_CANCEL with the wrapped userData.
+    OperationHandle accept(int fd, ::sockaddr_in* addr, socklen_t* addrlen, CompletionHandler cb);
 
-    bool accept(int fd, ::sockaddr_in* addr, socklen_t* addrlen, CompletionHandler cb);
-
-    bool connect(int sockfd, const ::sockaddr* addr, socklen_t addrlen, CompletionHandler cb);
+    OperationHandle connect(
+        int sockfd, const ::sockaddr* addr, socklen_t addrlen, CompletionHandler cb);
 
     // res argument is sent bytes
-    bool send(int sockfd, const void* buf, size_t len, CompletionHandler cb);
+    OperationHandle send(int sockfd, const void* buf, size_t len, CompletionHandler cb);
 
     // timeout may be nullptr for convenience (which is equivalent to the function above)
-    bool send(int sockfd, const void* buf, size_t len, Timespec* timeout, bool timeoutIsAbsolute,
-        CompletionHandler cb);
+    OperationHandle send(int sockfd, const void* buf, size_t len, Timespec* timeout,
+        bool timeoutIsAbsolute, CompletionHandler cb);
 
     // res argument is received bytes
-    bool recv(int sockfd, void* buf, size_t len, CompletionHandler cb);
+    OperationHandle recv(int sockfd, void* buf, size_t len, CompletionHandler cb);
 
-    bool recv(int sockfd, void* buf, size_t len, Timespec* timeout, bool timeoutIsAbsolute,
-        CompletionHandler cb);
+    OperationHandle recv(int sockfd, void* buf, size_t len, Timespec* timeout,
+        bool timeoutIsAbsolute, CompletionHandler cb);
 
-    bool read(int fd, void* buf, size_t count, CompletionHandler cb);
+    OperationHandle read(int fd, void* buf, size_t count, CompletionHandler cb);
 
-    bool close(int fd, CompletionHandler cb);
+    OperationHandle close(int fd, CompletionHandler cb);
 
-    bool shutdown(int fd, int how, CompletionHandler cb);
+    OperationHandle shutdown(int fd, int how, CompletionHandler cb);
 
-    bool poll(int fd, short events, CompletionHandler cb);
+    OperationHandle poll(int fd, short events, CompletionHandler cb);
 
-    bool recvmsg(int sockfd, ::msghdr* msg, int flags, CompletionHandler cb);
+    OperationHandle recvmsg(int sockfd, ::msghdr* msg, int flags, CompletionHandler cb);
 
-    bool sendmsg(int sockfd, const ::msghdr* msg, int flags, CompletionHandler cb);
+    OperationHandle sendmsg(int sockfd, const ::msghdr* msg, int flags, CompletionHandler cb);
 
     // These functions are just convenience wrappers on top of recvmsg and sendmsg.
     // They need to wrap the callback and allocate a ::msghdr and ::iovec on the heap.
     // This is also why addrLen is not an in-out parameter, but just an in-parameter.
     // If you need it to be fast, use recvmsg and sendmsg.
-    bool recvfrom(int sockfd, void* buf, size_t len, int flags, ::sockaddr* srcAddr,
+    OperationHandle recvfrom(int sockfd, void* buf, size_t len, int flags, ::sockaddr* srcAddr,
         socklen_t addrLen, CompletionHandler cb);
 
-    bool recvfrom(
+    OperationHandle recvfrom(
         int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr, CompletionHandler cb)
     {
         return recvfrom(sockfd, buf, len, flags, reinterpret_cast<::sockaddr*>(srcAddr),
             sizeof(::sockaddr_in), std::move(cb));
     }
 
-    bool sendto(int sockfd, const void* buf, size_t len, int flags, const ::sockaddr* destAddr,
-        socklen_t addrLen, CompletionHandler cb);
+    OperationHandle sendto(int sockfd, const void* buf, size_t len, int flags,
+        const ::sockaddr* destAddr, socklen_t addrLen, CompletionHandler cb);
 
-    bool sendto(int sockfd, const void* buf, size_t len, int flags, const ::sockaddr_in* destAddr,
-        CompletionHandler cb)
+    OperationHandle sendto(int sockfd, const void* buf, size_t len, int flags,
+        const ::sockaddr_in* destAddr, CompletionHandler cb)
     {
         return sendto(sockfd, buf, len, flags, reinterpret_cast<const ::sockaddr*>(destAddr),
             sizeof(::sockaddr_in), std::move(cb));
     }
 
+    // Note that the cancelation is asynchronous as well, so it is also possible that the operation
+    // completes before the cancelation has been consumed. In this case the handler still might get
+    // called with a successful result instead of ECANCELED. If cancelHandler is true the handler
+    // will not be called again in either case, even if the async cancelation could not be submitted
+    // at all.
+    OperationHandle cancel(OperationHandle operation, bool cancelHandler);
 
     void run();
 
@@ -126,8 +136,9 @@ private:
         CompletionHandler handler;
     };
 
-    bool addSqe(io_uring_sqe* sqe, CompletionHandler cb);
-    bool addSqe(io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, CompletionHandler cb);
+    OperationHandle addSqe(io_uring_sqe* sqe, CompletionHandler cb);
+    OperationHandle addSqe(
+        io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, CompletionHandler cb);
 
     IoURing ring_;
     size_t numOpsQueued_ = 0;

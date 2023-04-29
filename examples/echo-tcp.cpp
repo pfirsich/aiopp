@@ -103,10 +103,12 @@ private:
     {
         bool added = false;
         while (!added) {
-            added = io_.accept(listenSocket_, nullptr, nullptr, [this](IoResult result) {
-                handleAccept(result);
-                accept();
-            });
+            added = io_.accept(listenSocket_, nullptr, nullptr,
+                           [this](IoResult result) {
+                               handleAccept(result);
+                               accept();
+                           })
+                        .valid();
         }
     }
 
