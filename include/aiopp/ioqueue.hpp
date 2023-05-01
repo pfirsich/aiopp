@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <coroutine>
 #include <future>
 #include <limits>
 #include <system_error>
@@ -23,7 +24,7 @@ public:
 
     std::error_code error() const
     {
-        assert(result_ < 0 && result_ != std::numeric_limits<int>::min());
+        assert(result_ < 0);
         return std::make_error_code(static_cast<std::errc>(result_));
     }
 
@@ -42,8 +43,8 @@ private:
 };
 
 class IoQueue {
-    static constexpr auto UserDataInvalid = 0;
-    static constexpr auto UserDataIgnore = std::numeric_limits<uint64_t>::max();
+    static constexpr uint64_t UserDataInvalid = 0;
+    static constexpr uint64_t UserDataIgnore = std::numeric_limits<uint64_t>::max();
 
 public:
     using Timespec = IoURing::Timespec;
@@ -54,6 +55,67 @@ public:
 
         bool valid() const { return userData != UserDataInvalid; }
         explicit operator bool() const { return valid(); }
+    };
+
+    struct AwaiterBase {
+        std::coroutine_handle<> caller;
+        IoResult result;
+
+        bool await_ready() const noexcept { return false; }
+
+        IoResult await_resume() const noexcept { return result; }
+
+        void complete(IoResult res)
+        {
+            result = res;
+            caller.resume();
+        }
+    };
+
+    template <typename Method, typename... Args>
+    class Awaitable {
+    public:
+        Awaitable(IoQueue& io, Method method, Args... args)
+            : io_(io)
+            , method_(method)
+            , args_(std::make_tuple(args...))
+        {
+        }
+
+        struct Awaiter : public AwaiterBase {
+            Awaitable& awaitable;
+            OperationHandle operation;
+
+            Awaiter(Awaitable& a)
+                : awaitable(a)
+            {
+            }
+
+            ~Awaiter()
+            {
+                if (operation) {
+                    awaitable.io_.cancel(operation, true);
+                }
+            }
+
+            void await_suspend(std::coroutine_handle<> handle) noexcept
+            {
+                caller = handle;
+                std::apply(
+                    [this](auto&&... args) {
+                        operation = (awaitable.io_.*awaitable.method_)(
+                            std::forward<decltype(args)>(args)..., this);
+                    },
+                    awaitable.args_);
+            }
+        };
+
+        auto operator co_await() { return Awaiter { *this }; }
+
+    private:
+        IoQueue& io_;
+        Method method_;
+        std::tuple<Args...> args_;
     };
 
     // These are both relative with respect to their arguments, but naming these is hard.
@@ -68,11 +130,26 @@ public:
 
     OperationHandle accept(int fd, ::sockaddr_in* addr, socklen_t* addrlen, CompletionHandler cb);
 
+    OperationHandle acceptAwaiter(
+        int fd, ::sockaddr_in* addr, socklen_t* addrlen, AwaiterBase* awaiter);
+
+    auto accept(int fd, ::sockaddr_in* addr, socklen_t* addrlen)
+    {
+        return Awaitable(*this, &IoQueue::acceptAwaiter, fd, addr, addrlen);
+    }
+
     OperationHandle connect(
         int sockfd, const ::sockaddr* addr, socklen_t addrlen, CompletionHandler cb);
 
     // res argument is sent bytes
     OperationHandle send(int sockfd, const void* buf, size_t len, CompletionHandler cb);
+
+    OperationHandle sendAwaiter(int sockfd, const void* buf, size_t len, AwaiterBase* awaiter);
+
+    auto send(int sockfd, const void* buf, size_t len)
+    {
+        return Awaitable(*this, &IoQueue::sendAwaiter, sockfd, buf, len);
+    }
 
     // timeout may be nullptr for convenience (which is equivalent to the function above)
     OperationHandle send(int sockfd, const void* buf, size_t len, Timespec* timeout,
@@ -81,6 +158,13 @@ public:
     // res argument is received bytes
     OperationHandle recv(int sockfd, void* buf, size_t len, CompletionHandler cb);
 
+    OperationHandle recvAwaiter(int sockfd, void* buf, size_t len, AwaiterBase* awaiter);
+
+    auto recv(int sockfd, void* buf, size_t len)
+    {
+        return Awaitable(*this, &IoQueue::recvAwaiter, sockfd, buf, len);
+    }
+
     OperationHandle recv(int sockfd, void* buf, size_t len, Timespec* timeout,
         bool timeoutIsAbsolute, CompletionHandler cb);
 
@@ -88,13 +172,32 @@ public:
 
     OperationHandle close(int fd, CompletionHandler cb);
 
+    OperationHandle closeAwaiter(int fd, AwaiterBase* awaiter);
+
+    auto close(int fd) { return Awaitable(*this, &IoQueue::closeAwaiter, fd); }
+
     OperationHandle shutdown(int fd, int how, CompletionHandler cb);
 
     OperationHandle poll(int fd, short events, CompletionHandler cb);
 
     OperationHandle recvmsg(int sockfd, ::msghdr* msg, int flags, CompletionHandler cb);
 
+    OperationHandle recvmsgAwaiter(int sockfd, ::msghdr* msg, int flags, AwaiterBase* awaiter);
+
+    auto recvmsg(int sockfd, ::msghdr* msg, int flags)
+    {
+        return Awaitable(*this, &IoQueue::recvmsgAwaiter, sockfd, msg, flags);
+    }
+
     OperationHandle sendmsg(int sockfd, const ::msghdr* msg, int flags, CompletionHandler cb);
+
+    OperationHandle sendmsgAwaiter(
+        int sockfd, const ::msghdr* msg, int flags, AwaiterBase* awaiter);
+
+    auto sendmsg(int sockfd, ::msghdr* msg, int flags)
+    {
+        return Awaitable(*this, &IoQueue::sendmsgAwaiter, sockfd, msg, flags);
+    }
 
     // These functions are just convenience wrappers on top of recvmsg and sendmsg.
     // They need to wrap the callback and allocate a ::msghdr and ::iovec on the heap.
@@ -136,7 +239,13 @@ private:
         CompletionHandler handler;
     };
 
+    struct CoroutineCompleter {
+        AwaiterBase* awaiter;
+    };
+
     OperationHandle addSqe(io_uring_sqe* sqe, CompletionHandler cb);
+    OperationHandle addSqe(io_uring_sqe* sqe, AwaiterBase* awaiter);
+
     OperationHandle addSqe(
         io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, CompletionHandler cb);
 

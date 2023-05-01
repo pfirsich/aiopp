@@ -9,6 +9,31 @@
 #include "aiopp/util.hpp"
 
 namespace aiopp {
+namespace {
+    struct PointerTags {
+        bool coroutine = false;
+    };
+
+    template <typename T>
+    uint64_t tagPointer(T* ptr, PointerTags tags)
+    {
+        static_assert(std::alignment_of_v<T> >= 8);
+        uint64_t userData = reinterpret_cast<uintptr_t>(ptr);
+        if (tags.coroutine) {
+            userData |= 1;
+        }
+        return userData;
+    }
+
+    std::pair<void*, PointerTags> untagPointer(uint64_t userData)
+    {
+        // The upper 16 bits are unused in x64 and since the types we are pointing to are aligned to
+        // at least 8 bytes, the lowest 3 bits are always 0 and can be used for tags;
+        const auto ptr = userData & (0x0000'ffff'ffff'fff0 | 0b11111000);
+        return { reinterpret_cast<void*>(ptr), PointerTags { .coroutine = (userData & 1) != 0 } };
+    }
+}
+
 void IoQueue::setRelativeTimeout(Timespec* ts, uint64_t milliseconds)
 {
     ts->tv_sec = milliseconds / 1000;
@@ -58,6 +83,12 @@ IoQueue::OperationHandle IoQueue::accept(
         ring_.prepareAccept(fd, reinterpret_cast<sockaddr*>(addr), addrlen), std::move(cb));
 }
 
+IoQueue::OperationHandle IoQueue::acceptAwaiter(
+    int fd, ::sockaddr_in* addr, socklen_t* addrlen, AwaiterBase* awaiter)
+{
+    return addSqe(ring_.prepareAccept(fd, reinterpret_cast<sockaddr*>(addr), addrlen), awaiter);
+}
+
 IoQueue::OperationHandle IoQueue::connect(
     int sockfd, const ::sockaddr* addr, socklen_t addrlen, CompletionHandler cb)
 {
@@ -68,6 +99,12 @@ IoQueue::OperationHandle IoQueue::send(
     int sockfd, const void* buf, size_t len, CompletionHandler cb)
 {
     return addSqe(ring_.prepareSend(sockfd, buf, len), std::move(cb));
+}
+
+IoQueue::OperationHandle IoQueue::sendAwaiter(
+    int sockfd, const void* buf, size_t len, AwaiterBase* awaiter)
+{
+    return addSqe(ring_.prepareSend(sockfd, buf, len), awaiter);
 }
 
 IoQueue::OperationHandle IoQueue::send(int sockfd, const void* buf, size_t len,
@@ -82,6 +119,12 @@ IoQueue::OperationHandle IoQueue::send(int sockfd, const void* buf, size_t len,
 IoQueue::OperationHandle IoQueue::recv(int sockfd, void* buf, size_t len, CompletionHandler cb)
 {
     return addSqe(ring_.prepareRecv(sockfd, buf, len), std::move(cb));
+}
+
+IoQueue::OperationHandle IoQueue::recvAwaiter(
+    int sockfd, void* buf, size_t len, AwaiterBase* awaiter)
+{
+    return addSqe(ring_.prepareRecv(sockfd, buf, len), awaiter);
 }
 
 IoQueue::OperationHandle IoQueue::recv(int sockfd, void* buf, size_t len,
@@ -103,6 +146,11 @@ IoQueue::OperationHandle IoQueue::close(int fd, CompletionHandler cb)
     return addSqe(ring_.prepareClose(fd), std::move(cb));
 }
 
+IoQueue::OperationHandle IoQueue::closeAwaiter(int fd, AwaiterBase* awaiter)
+{
+    return addSqe(ring_.prepareClose(fd), awaiter);
+}
+
 IoQueue::OperationHandle IoQueue::shutdown(int fd, int how, CompletionHandler cb)
 {
     return addSqe(ring_.prepareShutdown(fd, how), std::move(cb));
@@ -119,23 +167,22 @@ IoQueue::OperationHandle IoQueue::recvmsg(
     return addSqe(ring_.prepareRecvmsg(sockfd, msg, flags), std::move(cb));
 }
 
+IoQueue::OperationHandle IoQueue::recvmsgAwaiter(
+    int sockfd, ::msghdr* msg, int flags, AwaiterBase* awaiter)
+{
+    return addSqe(ring_.prepareRecvmsg(sockfd, msg, flags), awaiter);
+}
+
 IoQueue::OperationHandle IoQueue::sendmsg(
     int sockfd, const ::msghdr* msg, int flags, CompletionHandler cb)
 {
     return addSqe(ring_.prepareSendmsg(sockfd, msg, flags), std::move(cb));
 }
 
-IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelHandler)
+IoQueue::OperationHandle IoQueue::sendmsgAwaiter(
+    int sockfd, const ::msghdr* msg, int flags, AwaiterBase* awaiter)
 {
-    if (cancelHandler) {
-        reinterpret_cast<CallbackCompleter*>(operation.userData)->handler = nullptr;
-    }
-    auto sqe = ring_.prepareAsyncCancel(operation.userData);
-    if (sqe) {
-        sqe->user_data = UserDataIgnore;
-        return { sqe->user_data };
-    }
-    return {};
+    return addSqe(ring_.prepareSendmsg(sockfd, msg, flags), awaiter);
 }
 
 namespace {
@@ -179,6 +226,25 @@ IoQueue::OperationHandle IoQueue::sendto(int sockfd, const void* buf, size_t len
         [context = std::move(context), cb = std::move(cb)](IoResult res) { cb(res); });
 }
 
+IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelHandler)
+{
+    assert(operation);
+    if (cancelHandler) {
+        const auto [ptr, tags] = untagPointer(operation.userData);
+        if (tags.coroutine) {
+            reinterpret_cast<CoroutineCompleter*>(ptr)->awaiter = nullptr;
+        } else {
+            reinterpret_cast<CallbackCompleter*>(ptr)->handler = nullptr;
+        }
+    }
+    auto sqe = ring_.prepareAsyncCancel(operation.userData);
+    if (sqe) {
+        sqe->user_data = UserDataIgnore;
+        return { sqe->user_data };
+    }
+    return {};
+}
+
 void IoQueue::run()
 {
     while (numOpsQueued_ > 0) {
@@ -193,11 +259,20 @@ void IoQueue::run()
         }
 
         if (cqe->user_data != UserDataIgnore) {
-            const auto completer = reinterpret_cast<CallbackCompleter*>(cqe->user_data);
-            if (completer->handler) {
-                completer->handler(IoResult(cqe->res));
+            const auto [ptr, tags] = untagPointer(cqe->user_data);
+            if (tags.coroutine) {
+                const auto completer = reinterpret_cast<CoroutineCompleter*>(ptr);
+                if (completer->awaiter) {
+                    completer->awaiter->complete(IoResult(cqe->res));
+                }
+                delete completer;
+            } else {
+                const auto completer = reinterpret_cast<CallbackCompleter*>(ptr);
+                if (completer->handler) {
+                    completer->handler(IoResult(cqe->res));
+                }
+                delete completer;
             }
-            delete completer;
             numOpsQueued_--;
         }
         ring_.advanceCq();
@@ -211,7 +286,18 @@ IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, CompletionHandler cb
         return {};
     }
     numOpsQueued_++;
-    sqe->user_data = reinterpret_cast<uint64_t>(new CallbackCompleter { std::move(cb) });
+    sqe->user_data = tagPointer(new CallbackCompleter { std::move(cb) }, {});
+    return { sqe->user_data };
+}
+
+IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, AwaiterBase* awaiter)
+{
+    if (!sqe) {
+        getLogger().log(LogSeverity::Warning, "io_uring full");
+        return {};
+    }
+    numOpsQueued_++;
+    sqe->user_data = tagPointer(new CoroutineCompleter { awaiter }, { .coroutine = true });
     return { sqe->user_data };
 }
 

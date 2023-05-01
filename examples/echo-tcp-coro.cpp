@@ -1,7 +1,6 @@
 #include "aiopp/ioqueue.hpp"
 #include "aiopp/socket.hpp"
 
-#include "aiopp/awaitables.hpp"
 #include "aiopp/basiccoroutine.hpp"
 #include "aiopp/task.hpp"
 
@@ -15,7 +14,7 @@ Task<std::pair<std::error_code, bool>> sendAll(
     size_t offset = 0;
     while (offset < buffer.size()) {
         const auto sentBytes
-            = co_await send(io, socket, buffer.data() + offset, buffer.size() - offset);
+            = co_await io.send(socket, buffer.data() + offset, buffer.size() - offset);
         if (!sentBytes) {
             spdlog::error("Error in send: {}", sentBytes.error().message());
             co_return std::make_pair(sentBytes.error(), false);
@@ -34,7 +33,7 @@ BasicCoroutine echo(IoQueue& io, Fd socket)
 {
     while (true) {
         std::string recvBuffer(1024, '\0');
-        const auto receivedBytes = co_await recv(io, socket, recvBuffer.data(), recvBuffer.size());
+        const auto receivedBytes = co_await io.recv(socket, recvBuffer.data(), recvBuffer.size());
         if (!receivedBytes) {
             spdlog::error("Error in receive: {}", receivedBytes.error().message());
             break;
@@ -51,13 +50,13 @@ BasicCoroutine echo(IoQueue& io, Fd socket)
             break;
         }
     }
-    co_await close(io, socket.release());
+    co_await io.close(socket.release());
 }
 
 BasicCoroutine serve(IoQueue& io, Fd&& listenSocket)
 {
     while (true) {
-        const auto fd = co_await accept(io, listenSocket, nullptr, nullptr);
+        const auto fd = co_await io.accept(listenSocket, nullptr, nullptr);
         if (!fd) {
             spdlog::error("Error in accept: {}", fd.error().message());
             continue;
