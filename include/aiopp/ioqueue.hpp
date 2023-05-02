@@ -59,15 +59,13 @@ public:
 
     struct AwaiterBase {
         std::coroutine_handle<> caller;
+        OperationHandle operation;
         IoResult result;
-
-        bool await_ready() const noexcept { return false; }
-
-        IoResult await_resume() const noexcept { return result; }
 
         void complete(IoResult res)
         {
             result = res;
+            operation = {}; // Now the operation has completed, we don't want to cancel it anymore.
             caller.resume();
         }
     };
@@ -84,19 +82,23 @@ public:
 
         struct Awaiter : public AwaiterBase {
             Awaitable& awaitable;
-            OperationHandle operation;
 
             Awaiter(Awaitable& a)
                 : awaitable(a)
             {
             }
 
+            // We need to cancel, because it's possible the coroutine and therefore the Awaiter it
+            // lives in is destroyed before the IO operation completes. We want to make sure we
+            // don't call into a freed AwaiterBase, so we need to cancel the request and unregister.
             ~Awaiter()
             {
                 if (operation) {
                     awaitable.io_.cancel(operation, true);
                 }
             }
+
+            bool await_ready() const noexcept { return false; }
 
             void await_suspend(std::coroutine_handle<> handle) noexcept
             {
@@ -108,6 +110,8 @@ public:
                     },
                     awaitable.args_);
             }
+
+            IoResult await_resume() const noexcept { return result; }
         };
 
         auto operator co_await() { return Awaiter { *this }; }
