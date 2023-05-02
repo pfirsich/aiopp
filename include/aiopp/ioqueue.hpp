@@ -213,6 +213,14 @@ public:
             sizeof(::sockaddr_in), std::move(cb));
     }
 
+    OperationHandle recvfromAwaiter(
+        int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr, AwaiterBase* awaiter);
+
+    auto recvfrom(int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr)
+    {
+        return Awaitable(*this, &IoQueue::recvfromAwaiter, sockfd, buf, len, flags, srcAddr);
+    }
+
     OperationHandle sendto(int sockfd, const void* buf, size_t len, int flags,
         const ::sockaddr* destAddr, socklen_t addrLen, CompletionHandler cb);
 
@@ -221,6 +229,14 @@ public:
     {
         return sendto(sockfd, buf, len, flags, reinterpret_cast<const ::sockaddr*>(destAddr),
             sizeof(::sockaddr_in), std::move(cb));
+    }
+
+    OperationHandle sendtoAwaiter(int sockfd, const void* buf, size_t len, int flags,
+        const ::sockaddr_in* destAddr, AwaiterBase* awaiter);
+
+    auto sendto(int sockfd, const void* buf, size_t len, int flags, const ::sockaddr_in* destAddr)
+    {
+        return Awaitable(*this, &IoQueue::sendtoAwaiter, sockfd, buf, len, flags, destAddr);
     }
 
     // Note that the cancelation is asynchronous as well, so it is also possible that the operation
@@ -235,6 +251,52 @@ public:
     size_t getNumOpsQueued() const { return numOpsQueued_; }
 
 private:
+    struct GenericCompleter {
+        virtual ~GenericCompleter() = default;
+        virtual void clear() = 0;
+        virtual void complete(IoResult) = 0;
+    };
+
+    template <typename Storage>
+    struct StorageCallbackCompleter : public GenericCompleter {
+        CompletionHandler handler;
+        Storage storage;
+
+        StorageCallbackCompleter(CompletionHandler handler)
+            : handler(std::move(handler))
+        {
+        }
+
+        void clear() override { handler = nullptr; }
+
+        void complete(IoResult result) override
+        {
+            if (handler) {
+                handler(result);
+            }
+        }
+    };
+
+    template <typename Storage>
+    struct StorageCoroutineCompleter : public GenericCompleter {
+        AwaiterBase* awaiter;
+        Storage storage;
+
+        StorageCoroutineCompleter(AwaiterBase* awaiter)
+            : awaiter(awaiter)
+        {
+        }
+
+        void clear() override { awaiter = nullptr; }
+
+        void complete(IoResult result) override
+        {
+            if (awaiter) {
+                awaiter->complete(result);
+            }
+        }
+    };
+
     struct CallbackCompleter {
         CompletionHandler handler;
     };
@@ -245,6 +307,7 @@ private:
 
     OperationHandle addSqe(io_uring_sqe* sqe, CompletionHandler cb);
     OperationHandle addSqe(io_uring_sqe* sqe, AwaiterBase* awaiter);
+    OperationHandle addSqe(io_uring_sqe* sqe, GenericCompleter* awaiter);
 
     OperationHandle addSqe(
         io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, CompletionHandler cb);

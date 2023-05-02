@@ -1,7 +1,6 @@
 #include "aiopp/ioqueue.hpp"
 #include "aiopp/socket.hpp"
 
-#include "aiopp/awaitables.hpp"
 #include "aiopp/basiccoroutine.hpp"
 
 #include "spdlogger.hpp"
@@ -13,16 +12,16 @@ BasicCoroutine serve(IoQueue& io, const Fd& socket)
     while (true) {
         std::string receiveBuffer(1024, '\0');
         ::sockaddr_in clientAddr;
-        const auto receivedBytes = co_await recvfrom(
-            io, socket, receiveBuffer.data(), receiveBuffer.size(), 0, &clientAddr);
+        const auto receivedBytes = co_await io.recvfrom(
+            socket, receiveBuffer.data(), receiveBuffer.size(), 0, &clientAddr);
         if (!receivedBytes) {
             spdlog::error("Error in recvfrom: {}", receivedBytes.error().message());
             continue;
         }
         receiveBuffer.resize(*receivedBytes);
 
-        const auto sentBytes = co_await sendto(
-            io, socket, receiveBuffer.data(), receiveBuffer.size(), 0, &clientAddr);
+        const auto sentBytes = co_await io.sendto(
+            socket, receiveBuffer.data(), receiveBuffer.size(), 0, &clientAddr);
         if (!sentBytes) {
             spdlog::error("Error in sendto: {}", sentBytes.error().message());
             continue;

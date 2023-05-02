@@ -11,7 +11,7 @@
 namespace aiopp {
 namespace {
     struct PointerTags {
-        enum class Type { Coroutine = 0, Callback = 1 };
+        enum class Type { Coroutine = 0, Callback = 1, Generic = 2 };
         Type type;
     };
 
@@ -190,21 +190,16 @@ namespace {
         ::msghdr msg;
         ::iovec iov;
 
-        static std::unique_ptr<MsgContext> makeContext(
-            void* buf, size_t len, ::sockaddr* addr, socklen_t addrLen)
+        void set(void* buf, size_t len, ::sockaddr* addr, socklen_t addrLen)
         {
-            auto context = std::make_unique<MsgContext>(MsgContext {
-                ::msghdr {
-                    .msg_name = addr,
-                    .msg_namelen = addrLen,
-                    .msg_iovlen = 1,
-                    .msg_controllen = 0,
-                    .msg_flags = 0,
-                },
-                ::iovec { buf, len },
-            });
-            context->msg.msg_iov = &context->iov;
-            return context;
+            iov.iov_base = buf;
+            iov.iov_len = len;
+            msg.msg_name = addr;
+            msg.msg_namelen = addrLen;
+            msg.msg_iov = &iov;
+            msg.msg_iovlen = 1;
+            msg.msg_controllen = 0;
+            msg.msg_flags = 0;
         }
     };
 }
@@ -212,18 +207,34 @@ namespace {
 IoQueue::OperationHandle IoQueue::recvfrom(int sockfd, void* buf, size_t len, int flags,
     ::sockaddr* srcAddr, socklen_t addrLen, CompletionHandler cb)
 {
-    auto context = MsgContext::makeContext(buf, len, srcAddr, addrLen);
-    return recvmsg(sockfd, &context->msg, flags,
-        [context = std::move(context), cb = std::move(cb)](IoResult res) { cb(res); });
+    auto completer = new StorageCallbackCompleter<MsgContext>(std::move(cb));
+    completer->storage.set(buf, len, srcAddr, addrLen);
+    return addSqe(ring_.prepareRecvmsg(sockfd, &completer->storage.msg, flags), completer);
+}
+
+IoQueue::OperationHandle IoQueue::recvfromAwaiter(
+    int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr, AwaiterBase* awaiter)
+{
+    auto completer = new StorageCoroutineCompleter<MsgContext>(awaiter);
+    completer->storage.set(buf, len, reinterpret_cast<::sockaddr*>(srcAddr), sizeof(::sockaddr_in));
+    return addSqe(ring_.prepareRecvmsg(sockfd, &completer->storage.msg, flags), completer);
 }
 
 IoQueue::OperationHandle IoQueue::sendto(int sockfd, const void* buf, size_t len, int flags,
     const ::sockaddr* destAddr, socklen_t addrLen, CompletionHandler cb)
 {
-    auto context = MsgContext::makeContext(
-        const_cast<void*>(buf), len, const_cast<::sockaddr*>(destAddr), addrLen);
-    return sendmsg(sockfd, &context->msg, flags,
-        [context = std::move(context), cb = std::move(cb)](IoResult res) { cb(res); });
+    auto completer = new StorageCallbackCompleter<MsgContext>(std::move(cb));
+    completer->storage.set(const_cast<void*>(buf), len, const_cast<::sockaddr*>(destAddr), addrLen);
+    return addSqe(ring_.prepareSendmsg(sockfd, &completer->storage.msg, flags), completer);
+}
+
+IoQueue::OperationHandle IoQueue::sendtoAwaiter(int sockfd, const void* buf, size_t len, int flags,
+    const ::sockaddr_in* destAddr, AwaiterBase* awaiter)
+{
+    auto completer = new StorageCoroutineCompleter<MsgContext>(awaiter);
+    completer->storage.set(const_cast<void*>(buf), len,
+        reinterpret_cast<::sockaddr*>(const_cast<::sockaddr_in*>(destAddr)), sizeof(::sockaddr_in));
+    return addSqe(ring_.prepareSendmsg(sockfd, &completer->storage.msg, flags), completer);
 }
 
 IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelHandler)
@@ -235,6 +246,8 @@ IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelH
             reinterpret_cast<CoroutineCompleter*>(ptr)->awaiter = nullptr;
         } else if (tags.type == PointerTags::Type::Callback) {
             reinterpret_cast<CallbackCompleter*>(ptr)->handler = nullptr;
+        } else if (tags.type == PointerTags::Type::Generic) {
+            reinterpret_cast<GenericCompleter*>(ptr)->clear();
         }
     }
     auto sqe = ring_.prepareAsyncCancel(operation.userData);
@@ -258,6 +271,12 @@ void IoQueue::run()
             continue;
         }
 
+        // It's possible the pointer tagging and the two special cases for coroutines and callbacks
+        // are absolutely not necessary, but it's right here that I think they might be, because
+        // they would not be inlined if they were virtual function calls. At the same time we will
+        // call a function (type-erased) directly after, so maybe it makes no difference after all.
+        // I will keep it until it bothers me too much and I find out for a fact that it makes no
+        // difference.
         if (cqe->user_data != UserDataIgnore) {
             const auto [ptr, tags] = untagPointer(cqe->user_data);
             if (tags.type == PointerTags::Type::Coroutine) {
@@ -271,6 +290,10 @@ void IoQueue::run()
                 if (completer->handler) {
                     completer->handler(IoResult(cqe->res));
                 }
+                delete completer;
+            } else if (tags.type == PointerTags::Type::Generic) {
+                const auto completer = reinterpret_cast<GenericCompleter*>(ptr);
+                completer->complete(IoResult(cqe->res));
                 delete completer;
             }
             numOpsQueued_--;
@@ -300,6 +323,17 @@ IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, AwaiterBase* awaiter
     numOpsQueued_++;
     sqe->user_data
         = tagPointer(new CoroutineCompleter { awaiter }, { .type = PointerTags::Type::Coroutine });
+    return { sqe->user_data };
+}
+
+IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, GenericCompleter* completer)
+{
+    if (!sqe) {
+        getLogger().log(LogSeverity::Warning, "io_uring full");
+        return {};
+    }
+    numOpsQueued_++;
+    sqe->user_data = tagPointer(completer, { .type = PointerTags::Type::Generic });
     return { sqe->user_data };
 }
 
