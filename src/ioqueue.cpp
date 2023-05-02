@@ -11,7 +11,8 @@
 namespace aiopp {
 namespace {
     struct PointerTags {
-        bool coroutine = false;
+        enum class Type { Coroutine = 0, Callback = 1 };
+        Type type;
     };
 
     template <typename T>
@@ -19,9 +20,7 @@ namespace {
     {
         static_assert(std::alignment_of_v<T> >= 8);
         uint64_t userData = reinterpret_cast<uintptr_t>(ptr);
-        if (tags.coroutine) {
-            userData |= 1;
-        }
+        userData |= static_cast<int>(tags.type);
         return userData;
     }
 
@@ -30,7 +29,8 @@ namespace {
         // The upper 16 bits are unused in x64 and since the types we are pointing to are aligned to
         // at least 8 bytes, the lowest 3 bits are always 0 and can be used for tags;
         const auto ptr = userData & (0x0000'ffff'ffff'fff0 | 0b11111000);
-        return { reinterpret_cast<void*>(ptr), PointerTags { .coroutine = (userData & 1) != 0 } };
+        const auto type = static_cast<PointerTags::Type>(userData & 0b11);
+        return { reinterpret_cast<void*>(ptr), PointerTags { .type = type } };
     }
 }
 
@@ -231,9 +231,9 @@ IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelH
     assert(operation);
     if (cancelHandler) {
         const auto [ptr, tags] = untagPointer(operation.userData);
-        if (tags.coroutine) {
+        if (tags.type == PointerTags::Type::Coroutine) {
             reinterpret_cast<CoroutineCompleter*>(ptr)->awaiter = nullptr;
-        } else {
+        } else if (tags.type == PointerTags::Type::Callback) {
             reinterpret_cast<CallbackCompleter*>(ptr)->handler = nullptr;
         }
     }
@@ -260,13 +260,13 @@ void IoQueue::run()
 
         if (cqe->user_data != UserDataIgnore) {
             const auto [ptr, tags] = untagPointer(cqe->user_data);
-            if (tags.coroutine) {
+            if (tags.type == PointerTags::Type::Coroutine) {
                 const auto completer = reinterpret_cast<CoroutineCompleter*>(ptr);
                 if (completer->awaiter) {
                     completer->awaiter->complete(IoResult(cqe->res));
                 }
                 delete completer;
-            } else {
+            } else if (tags.type == PointerTags::Type::Callback) {
                 const auto completer = reinterpret_cast<CallbackCompleter*>(ptr);
                 if (completer->handler) {
                     completer->handler(IoResult(cqe->res));
@@ -286,7 +286,8 @@ IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, CompletionHandler cb
         return {};
     }
     numOpsQueued_++;
-    sqe->user_data = tagPointer(new CallbackCompleter { std::move(cb) }, {});
+    sqe->user_data = tagPointer(
+        new CallbackCompleter { std::move(cb) }, { .type = PointerTags::Type::Callback });
     return { sqe->user_data };
 }
 
@@ -297,7 +298,8 @@ IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, AwaiterBase* awaiter
         return {};
     }
     numOpsQueued_++;
-    sqe->user_data = tagPointer(new CoroutineCompleter { awaiter }, { .coroutine = true });
+    sqe->user_data
+        = tagPointer(new CoroutineCompleter { awaiter }, { .type = PointerTags::Type::Coroutine });
     return { sqe->user_data };
 }
 
