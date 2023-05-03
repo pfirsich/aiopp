@@ -8,11 +8,6 @@
 #include "aiopp/util.hpp"
 
 namespace aiopp {
-IpAddress::IpAddress(uint32_t ipv4Addr)
-    : ipv4(ipv4Addr)
-{
-}
-
 std::optional<IpAddress> IpAddress::parse(const std::string& str)
 {
     ::in_addr addr;
@@ -21,6 +16,16 @@ std::optional<IpAddress> IpAddress::parse(const std::string& str)
         return std::nullopt;
     }
     return addr.s_addr;
+}
+
+IpAddress::IpAddress(uint32_t ipv4Addr)
+    : ipv4(ipv4Addr)
+{
+}
+
+std::string IpAddress::toString() const
+{
+    return ::inet_ntoa(::in_addr { ipv4 });
 }
 
 namespace {

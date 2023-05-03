@@ -12,8 +12,11 @@ namespace aiopp {
 enum class SocketType { Tcp, Udp };
 
 struct IpAddress {
-    IpAddress(uint32_t ipv4Addr);
     static std::optional<IpAddress> parse(const std::string& str);
+
+    IpAddress(uint32_t ipv4Addr);
+
+    std::string toString() const;
 
     uint32_t ipv4;
 };
