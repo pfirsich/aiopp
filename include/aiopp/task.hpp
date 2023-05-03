@@ -2,6 +2,7 @@
 
 #include <coroutine>
 
+namespace aiopp {
 template <typename Result = void>
 class [[nodiscard]] Task {
 public:
@@ -94,3 +95,4 @@ struct Task<void>::Promise {
     std::suspend_always initial_suspend() noexcept { return {}; }
     FinalAwaiter final_suspend() noexcept { return {}; }
 };
+}
