@@ -54,3 +54,7 @@ set_wall(echo-udp-coro)
 add_executable(resolve examples/resolve.cpp)
 target_link_libraries(resolve example-lib)
 set_wall(resolve)
+
+add_executable(channel examples/channel.cpp)
+target_link_libraries(channel example-lib)
+set_wall(channel)
