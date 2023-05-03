@@ -141,6 +141,11 @@ IoQueue::OperationHandle IoQueue::read(int fd, void* buf, size_t count, Completi
     return addSqe(ring_.prepareRead(fd, buf, count), std::move(cb));
 }
 
+IoQueue::OperationHandle IoQueue::readAwaiter(int fd, void* buf, size_t count, AwaiterBase* awaiter)
+{
+    return addSqe(ring_.prepareRead(fd, buf, count), awaiter);
+}
+
 IoQueue::OperationHandle IoQueue::close(int fd, CompletionHandler cb)
 {
     return addSqe(ring_.prepareClose(fd), std::move(cb));

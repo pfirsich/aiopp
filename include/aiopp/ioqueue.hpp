@@ -175,6 +175,13 @@ public:
 
     OperationHandle read(int fd, void* buf, size_t count, CompletionHandler cb);
 
+    OperationHandle readAwaiter(int fd, void* buf, size_t count, AwaiterBase* awaiter);
+
+    auto read(int fd, void* buf, size_t count)
+    {
+        return Awaitable(*this, &IoQueue::readAwaiter, fd, buf, count);
+    }
+
     OperationHandle close(int fd, CompletionHandler cb);
 
     OperationHandle closeAwaiter(int fd, AwaiterBase* awaiter);
