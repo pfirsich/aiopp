@@ -11,6 +11,7 @@
 
 #include "aiopp/function.hpp"
 #include "aiopp/iouring.hpp"
+#include "aiopp/task.hpp"
 
 namespace aiopp {
 struct IoResult {
@@ -213,13 +214,7 @@ public:
             sizeof(::sockaddr_in), std::move(cb));
     }
 
-    OperationHandle recvfromAwaiter(
-        int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr, AwaiterBase* awaiter);
-
-    auto recvfrom(int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr)
-    {
-        return Awaitable(*this, &IoQueue::recvfromAwaiter, sockfd, buf, len, flags, srcAddr);
-    }
+    Task<IoResult> recvfrom(int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr);
 
     OperationHandle sendto(int sockfd, const void* buf, size_t len, int flags,
         const ::sockaddr* destAddr, socklen_t addrLen, CompletionHandler cb);
@@ -231,13 +226,8 @@ public:
             sizeof(::sockaddr_in), std::move(cb));
     }
 
-    OperationHandle sendtoAwaiter(int sockfd, const void* buf, size_t len, int flags,
-        const ::sockaddr_in* destAddr, AwaiterBase* awaiter);
-
-    auto sendto(int sockfd, const void* buf, size_t len, int flags, const ::sockaddr_in* destAddr)
-    {
-        return Awaitable(*this, &IoQueue::sendtoAwaiter, sockfd, buf, len, flags, destAddr);
-    }
+    Task<IoResult> sendto(
+        int sockfd, const void* buf, size_t len, int flags, const ::sockaddr_in* destAddr);
 
     // Note that the cancelation is asynchronous as well, so it is also possible that the operation
     // completes before the cancelation has been consumed. In this case the handler still might get

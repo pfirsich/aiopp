@@ -186,20 +186,21 @@ IoQueue::OperationHandle IoQueue::sendmsgAwaiter(
 }
 
 namespace {
-    struct MsgContext {
-        ::msghdr msg;
+    struct MsgHdr {
         ::iovec iov;
+        ::msghdr msg;
 
-        void set(void* buf, size_t len, ::sockaddr* addr, socklen_t addrLen)
+        MsgHdr(void* buf, size_t len, void* addr, socklen_t addrLen)
+            : iov { .iov_base = buf, .iov_len = len }
+            , msg {
+                .msg_name = addr,
+                .msg_namelen = addrLen,
+                .msg_iov = &iov,
+                .msg_iovlen = 1,
+                .msg_controllen = 0,
+                .msg_flags = 0,
+            }
         {
-            iov.iov_base = buf;
-            iov.iov_len = len;
-            msg.msg_name = addr;
-            msg.msg_namelen = addrLen;
-            msg.msg_iov = &iov;
-            msg.msg_iovlen = 1;
-            msg.msg_controllen = 0;
-            msg.msg_flags = 0;
         }
     };
 }
@@ -207,34 +208,31 @@ namespace {
 IoQueue::OperationHandle IoQueue::recvfrom(int sockfd, void* buf, size_t len, int flags,
     ::sockaddr* srcAddr, socklen_t addrLen, CompletionHandler cb)
 {
-    auto completer = new StorageCallbackCompleter<MsgContext>(std::move(cb));
-    completer->storage.set(buf, len, srcAddr, addrLen);
-    return addSqe(ring_.prepareRecvmsg(sockfd, &completer->storage.msg, flags), completer);
+    auto msgHdr = std::make_unique<MsgHdr>(buf, len, srcAddr, addrLen);
+    return recvmsg(sockfd, &msgHdr->msg, flags, std::move(cb));
 }
 
-IoQueue::OperationHandle IoQueue::recvfromAwaiter(
-    int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr, AwaiterBase* awaiter)
+Task<IoResult> IoQueue::recvfrom(
+    int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr)
 {
-    auto completer = new StorageCoroutineCompleter<MsgContext>(awaiter);
-    completer->storage.set(buf, len, reinterpret_cast<::sockaddr*>(srcAddr), sizeof(::sockaddr_in));
-    return addSqe(ring_.prepareRecvmsg(sockfd, &completer->storage.msg, flags), completer);
+    MsgHdr msgHdr(buf, len, srcAddr, sizeof(::sockaddr_in));
+    co_return co_await recvmsg(sockfd, &msgHdr.msg, flags);
 }
 
 IoQueue::OperationHandle IoQueue::sendto(int sockfd, const void* buf, size_t len, int flags,
     const ::sockaddr* destAddr, socklen_t addrLen, CompletionHandler cb)
 {
-    auto completer = new StorageCallbackCompleter<MsgContext>(std::move(cb));
-    completer->storage.set(const_cast<void*>(buf), len, const_cast<::sockaddr*>(destAddr), addrLen);
-    return addSqe(ring_.prepareSendmsg(sockfd, &completer->storage.msg, flags), completer);
+    auto msgHdr = std::make_unique<MsgHdr>(
+        const_cast<void*>(buf), len, const_cast<::sockaddr*>(destAddr), addrLen);
+    return sendmsg(sockfd, &msgHdr->msg, flags, std::move(cb));
 }
 
-IoQueue::OperationHandle IoQueue::sendtoAwaiter(int sockfd, const void* buf, size_t len, int flags,
-    const ::sockaddr_in* destAddr, AwaiterBase* awaiter)
+Task<IoResult> IoQueue::sendto(
+    int sockfd, const void* buf, size_t len, int flags, const ::sockaddr_in* destAddr)
 {
-    auto completer = new StorageCoroutineCompleter<MsgContext>(awaiter);
-    completer->storage.set(const_cast<void*>(buf), len,
-        reinterpret_cast<::sockaddr*>(const_cast<::sockaddr_in*>(destAddr)), sizeof(::sockaddr_in));
-    return addSqe(ring_.prepareSendmsg(sockfd, &completer->storage.msg, flags), completer);
+    MsgHdr msgHdr(
+        const_cast<void*>(buf), len, const_cast<::sockaddr_in*>(destAddr), sizeof(::sockaddr_in));
+    co_return co_await sendmsg(sockfd, &msgHdr.msg, flags);
 }
 
 IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelHandler)
