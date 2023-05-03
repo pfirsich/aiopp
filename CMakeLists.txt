@@ -18,6 +18,7 @@ set(SRC
   ioqueue.cpp
   iouring.cpp
   log.cpp
+  net.cpp
   socket.cpp
   threadpool.cpp
   util.cpp
@@ -49,3 +50,7 @@ set_wall(echo-tcp-coro)
 add_executable(echo-udp-coro examples/echo-udp-coro.cpp)
 target_link_libraries(echo-udp-coro example-lib)
 set_wall(echo-udp-coro)
+
+add_executable(resolve examples/resolve.cpp)
+target_link_libraries(resolve example-lib)
+set_wall(resolve)
