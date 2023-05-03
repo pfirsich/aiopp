@@ -13,7 +13,6 @@ if(AIOPP_ENABLE_ASAN)
 endif()
 
 set(SRC
-  events.cpp
   fd.cpp
   ioqueue.cpp
   iouring.cpp
