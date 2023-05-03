@@ -13,11 +13,13 @@ if(AIOPP_ENABLE_ASAN)
 endif()
 
 set(SRC
+  eventfd.cpp
   fd.cpp
   ioqueue.cpp
   iouring.cpp
   log.cpp
   socket.cpp
+  threadpool.cpp
   util.cpp
 )
 list(TRANSFORM SRC PREPEND src/)

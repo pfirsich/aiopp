@@ -4,13 +4,17 @@
 #include <coroutine>
 #include <future>
 #include <limits>
+#include <memory>
 #include <system_error>
 #include <thread>
 
 #include <netinet/in.h>
 
 #include "aiopp/function.hpp"
+#include "aiopp/future.hpp"
 #include "aiopp/iouring.hpp"
+#include "aiopp/log.hpp"
+#include "aiopp/result.hpp"
 #include "aiopp/task.hpp"
 
 namespace aiopp {
@@ -105,7 +109,7 @@ public:
                         operation = (awaitable.io_.*awaitable.method_)(
                             std::forward<decltype(args)>(args)..., this);
                     },
-                    awaitable.args_);
+                    std::move(awaitable.args_));
             }
 
             IoResult await_resume() const noexcept { return result; }
@@ -228,6 +232,42 @@ public:
 
     Task<IoResult> sendto(
         int sockfd, const void* buf, size_t len, int flags, const ::sockaddr_in* destAddr);
+
+    // The IoQueue has to take ownership of the future, because it will call .get() on it.
+    template <typename T>
+    OperationHandle wait(Future<T> future, Function<void(Result<T>)> cb)
+    {
+        // I don't use EventFd::read here, because that doesn't return an OperationHandle and it
+        // doesn't return an OperationHandle, because then it would depend on IoQueue, but IoQueue
+        // already depends on EventFd.
+        auto readBuf = std::make_unique<uint64_t>();
+        return read(future.getEventFd().fd(), readBuf.get(), sizeof(uint64_t),
+            [future = std::move(future), cb = std::move(cb), readBuf = std::move(readBuf)](
+                IoResult result) {
+                if (!result) {
+                    cb(error(result.error()));
+                } else {
+                    assert(*result == 8);
+                    cb(future.get());
+                }
+            });
+    }
+
+    template <typename T>
+    Task<T> wait(Future<T> future)
+    {
+        if (future.ready()) {
+            co_return future.get();
+        }
+        const auto res = co_await future.getEventFd().read(*this);
+        if (!res) {
+            getLogger().log(
+                LogSeverity::Fatal, "Error reading from eventfd: " + res.error().message());
+            std::abort();
+        }
+        assert(*res == 1);
+        co_return future.get();
+    }
 
     // Note that the cancelation is asynchronous as well, so it is also possible that the operation
     // completes before the cancelation has been consumed. In this case the handler still might get
