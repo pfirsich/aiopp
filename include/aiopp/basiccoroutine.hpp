@@ -16,3 +16,10 @@ public:
     };
     using promise_type = Promise;
 };
+
+// With this you can turn a Task into an eager fire-and-forget coroutine, like BasicCoroutine
+template <typename Awaitable>
+BasicCoroutine fireAndForget(Awaitable awaitable)
+{
+    co_await awaitable;
+}
