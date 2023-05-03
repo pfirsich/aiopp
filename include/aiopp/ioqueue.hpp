@@ -233,6 +233,32 @@ public:
     Task<IoResult> sendto(
         int sockfd, const void* buf, size_t len, int flags, const ::sockaddr_in* destAddr);
 
+    OperationHandle timeout(Timespec* ts, uint64_t count, uint32_t flags, CompletionHandler cb);
+
+    OperationHandle timeoutAwaiter(
+        Timespec* ts, uint64_t count, uint32_t flags, AwaiterBase* awaiter);
+
+    auto timeout(Timespec* ts, uint64_t count, uint32_t flags)
+    {
+        using TimeoutAwaiter
+            = OperationHandle (IoQueue::*)(Timespec*, uint64_t, uint32_t, AwaiterBase*);
+        return Awaitable(
+            *this, static_cast<TimeoutAwaiter>(&IoQueue::timeoutAwaiter), ts, count, flags);
+    }
+
+    // sleep accuracy on linux is a few ms anyways, so millis is fine.
+    using Duration = std::chrono::milliseconds;
+
+    OperationHandle timeout(Duration dur, CompletionHandler cb);
+
+    Task<void> timeout(Duration dur);
+
+    using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
+
+    OperationHandle timeout(TimePoint point, CompletionHandler cb);
+
+    Task<void> timeout(TimePoint point);
+
     // The IoQueue has to take ownership of the future, because it will call .get() on it.
     template <typename T>
     OperationHandle wait(Future<T> future, Function<void(Result<T>)> cb)

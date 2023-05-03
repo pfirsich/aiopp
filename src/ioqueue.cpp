@@ -235,6 +235,68 @@ Task<IoResult> IoQueue::sendto(
     co_return co_await sendmsg(sockfd, &msgHdr.msg, flags);
 }
 
+namespace {
+    IoQueue::Timespec toTimespec(std::chrono::milliseconds dur)
+    {
+        IoQueue::Timespec ts;
+        ts.tv_sec = dur.count() / 1000;
+        ts.tv_nsec = (dur.count() % 1000) * 1000 * 1000;
+        return ts;
+    }
+
+    IoQueue::Timespec toTimespec(std::chrono::time_point<std::chrono::steady_clock> point)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        assert(now >= point);
+        const auto delta = point - std::chrono::steady_clock::now();
+        const auto deltaMs = std::chrono::duration_cast<std::chrono::milliseconds>(delta).count();
+        ::timespec nowTs;
+        ::clock_gettime(CLOCK_MONOTONIC, &nowTs);
+        IoQueue::Timespec ts;
+        ts.tv_sec = nowTs.tv_sec + deltaMs / 1000;
+        ts.tv_nsec = nowTs.tv_nsec + (deltaMs % 1000) * 1000 * 1000;
+        ts.tv_sec += ts.tv_nsec / (1000 * 1000 * 1000);
+        ts.tv_nsec = ts.tv_nsec % (1000 * 1000 * 1000);
+        return ts;
+    }
+}
+
+IoQueue::OperationHandle IoQueue::timeout(
+    Timespec* ts, uint64_t count, uint32_t flags, CompletionHandler cb)
+{
+    return addSqe(ring_.prepareTimeout(ts, count, flags), std::move(cb));
+}
+
+IoQueue::OperationHandle IoQueue::timeoutAwaiter(
+    Timespec* ts, uint64_t count, uint32_t flags, AwaiterBase* awaiter)
+{
+    return addSqe(ring_.prepareTimeout(ts, count, flags), awaiter);
+}
+
+IoQueue::OperationHandle IoQueue::timeout(Duration dur, CompletionHandler cb)
+{
+    auto ts = std::make_unique<Timespec>(toTimespec(dur));
+    return timeout(ts.get(), 0, 0, std::move(cb));
+}
+
+Task<void> IoQueue::timeout(Duration dur)
+{
+    auto ts = toTimespec(dur);
+    co_await timeout(&ts, 0, 0);
+}
+
+IoQueue::OperationHandle IoQueue::timeout(TimePoint point, CompletionHandler cb)
+{
+    auto ts = std::make_unique<Timespec>(toTimespec(point));
+    return timeout(ts.get(), 0, 0, std::move(cb));
+}
+
+Task<void> IoQueue::timeout(TimePoint point)
+{
+    auto ts = toTimespec(point);
+    co_await timeout(&ts, 0, IORING_TIMEOUT_ABS);
+}
+
 IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelHandler)
 {
     assert(operation);
