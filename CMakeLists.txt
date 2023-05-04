@@ -13,6 +13,7 @@ if(AIOPP_ENABLE_ASAN)
 endif()
 
 set(SRC
+  completermap.cpp
   eventfd.cpp
   fd.cpp
   ioqueue.cpp

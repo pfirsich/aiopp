@@ -16,18 +16,19 @@ namespace {
     };
 
     template <typename T>
-    uint64_t tagPointer(T* ptr, PointerTags tags)
+    void* tagPointer(T* ptr, PointerTags tags)
     {
         static_assert(std::alignment_of_v<T> >= 8);
-        uint64_t userData = reinterpret_cast<uintptr_t>(ptr);
+        auto userData = reinterpret_cast<uintptr_t>(ptr);
         userData |= static_cast<int>(tags.type);
-        return userData;
+        return reinterpret_cast<void*>(userData);
     }
 
-    std::pair<void*, PointerTags> untagPointer(uint64_t userData)
+    std::pair<void*, PointerTags> untagPointer(void* taggedPtr)
     {
         // The upper 16 bits are unused in x64 and since the types we are pointing to are aligned to
         // at least 8 bytes, the lowest 3 bits are always 0 and can be used for tags;
+        const uint64_t userData = reinterpret_cast<uintptr_t>(taggedPtr);
         const auto ptr = userData & (0x0000'ffff'ffff'fff0 | 0b11111000);
         const auto type = static_cast<PointerTags::Type>(userData & 0b11);
         return { reinterpret_cast<void*>(ptr), PointerTags { .type = type } };
@@ -51,6 +52,7 @@ void IoQueue::setAbsoluteTimeout(Timespec* ts, uint64_t milliseconds)
 }
 
 IoQueue::IoQueue(size_t size, bool submissionQueuePolling)
+    : completers_(size)
 {
     if (!ring_.init(size, submissionQueuePolling)) {
         getLogger().log(LogSeverity::Fatal, "Could not create io_uring: " + errnoToString(errno));
@@ -306,7 +308,21 @@ IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelH
 {
     assert(operation);
     if (cancelHandler) {
-        const auto [ptr, tags] = untagPointer(operation.userData);
+        // We could remove the entry from completers_, but since we might still get a CQE for the
+        // operation being cancelled, I would have to remove the assert in run() that makes sure
+        // that there is an entry in completers_ and I think it could catch some bugs, so I want to
+        // keep it.
+        const auto taggedPtr = completers_.get(operation.userData);
+        if (!taggedPtr) {
+            // The operation has already completed and there is no need to do anything.
+
+            // Currently we return a default constructed OperationHandle which is indistinguishable
+            // from not being able to issue the async cancelation, but considering there is no way
+            // to handle that case and the handler has been canceled, I don't think anyone will
+            // handle this.
+            return {};
+        }
+        const auto [ptr, tags] = untagPointer(taggedPtr);
         if (tags.type == PointerTags::Type::Coroutine) {
             reinterpret_cast<CoroutineCompleter*>(ptr)->awaiter = nullptr;
         } else if (tags.type == PointerTags::Type::Callback) {
@@ -316,11 +332,11 @@ IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelH
         }
     }
     auto sqe = ring_.prepareAsyncCancel(operation.userData);
-    if (sqe) {
-        sqe->user_data = UserDataIgnore;
-        return { sqe->user_data };
+    if (!sqe) {
+        return {};
     }
-    return {};
+    sqe->user_data = UserDataIgnore;
+    return { sqe->user_data };
 }
 
 void IoQueue::run()
@@ -343,7 +359,9 @@ void IoQueue::run()
         // I will keep it until it bothers me too much and I find out for a fact that it makes no
         // difference.
         if (cqe->user_data != UserDataIgnore) {
-            const auto [ptr, tags] = untagPointer(cqe->user_data);
+            const auto taggedPtr = completers_.get(cqe->user_data);
+            assert(taggedPtr);
+            const auto [ptr, tags] = untagPointer(taggedPtr);
             if (tags.type == PointerTags::Type::Coroutine) {
                 const auto completer = reinterpret_cast<CoroutineCompleter*>(ptr);
                 if (completer->awaiter) {
@@ -362,9 +380,18 @@ void IoQueue::run()
                 delete completer;
             }
             numOpsQueued_--;
+            completers_.erase(cqe->user_data);
         }
         ring_.advanceCq();
     }
+}
+
+uint64_t IoQueue::addCompleter(void* completer)
+{
+    const auto userData = nextUserData_;
+    nextUserData_++;
+    completers_.set(userData, completer);
+    return userData;
 }
 
 IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, CompletionHandler cb)
@@ -374,8 +401,8 @@ IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, CompletionHandler cb
         return {};
     }
     numOpsQueued_++;
-    sqe->user_data = tagPointer(
-        new CallbackCompleter { std::move(cb) }, { .type = PointerTags::Type::Callback });
+    sqe->user_data = addCompleter(tagPointer(
+        new CallbackCompleter { std::move(cb) }, { .type = PointerTags::Type::Callback }));
     return { sqe->user_data };
 }
 
@@ -386,8 +413,8 @@ IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, AwaiterBase* awaiter
         return {};
     }
     numOpsQueued_++;
-    sqe->user_data
-        = tagPointer(new CoroutineCompleter { awaiter }, { .type = PointerTags::Type::Coroutine });
+    sqe->user_data = addCompleter(
+        tagPointer(new CoroutineCompleter { awaiter }, { .type = PointerTags::Type::Coroutine }));
     return { sqe->user_data };
 }
 
@@ -398,7 +425,7 @@ IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, GenericCompleter* co
         return {};
     }
     numOpsQueued_++;
-    sqe->user_data = tagPointer(completer, { .type = PointerTags::Type::Generic });
+    sqe->user_data = addCompleter(tagPointer(completer, { .type = PointerTags::Type::Generic }));
     return { sqe->user_data };
 }
 

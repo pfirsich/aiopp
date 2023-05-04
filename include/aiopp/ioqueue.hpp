@@ -10,6 +10,7 @@
 
 #include <netinet/in.h>
 
+#include "aiopp/completermap.hpp"
 #include "aiopp/function.hpp"
 #include "aiopp/future.hpp"
 #include "aiopp/iouring.hpp"
@@ -368,6 +369,8 @@ private:
         AwaiterBase* awaiter;
     };
 
+    uint64_t addCompleter(void* completer);
+
     OperationHandle addSqe(io_uring_sqe* sqe, CompletionHandler cb);
     OperationHandle addSqe(io_uring_sqe* sqe, AwaiterBase* awaiter);
     OperationHandle addSqe(io_uring_sqe* sqe, GenericCompleter* awaiter);
@@ -376,6 +379,8 @@ private:
         io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, CompletionHandler cb);
 
     IoURing ring_;
+    CompleterMap completers_;
+    uint64_t nextUserData_ = 0;
     size_t numOpsQueued_ = 0;
 };
 }
