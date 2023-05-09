@@ -50,7 +50,25 @@ class IoQueue {
 
 public:
     using Timespec = IoURing::Timespec;
+    using ChronoDuration = std::chrono::milliseconds;
+    using ChronoTimePoint = std::chrono::time_point<std::chrono::steady_clock>;
     using CompletionHandler = Function<void(IoResult)>;
+
+    static void setTimespec(Timespec& ts, ChronoDuration duration);
+    static void setTimespec(Timespec& ts, ChronoTimePoint tp);
+
+    struct Duration : public Timespec {
+        // sleep accuracy on linux is a few ms anyways, so I think millis is fine.
+        Duration() = default;
+        Duration(ChronoDuration ms);
+        void set(ChronoDuration ms);
+    };
+
+    struct TimePoint : public Timespec {
+        TimePoint() = default;
+        TimePoint(ChronoTimePoint tp);
+        void set(ChronoTimePoint tp);
+    };
 
     struct OperationHandle {
         uint64_t userData = UserDataInvalid;
@@ -109,6 +127,10 @@ public:
                     [this](auto&&... args) {
                         operation = (awaitable.io_.*awaitable.method_)(
                             std::forward<decltype(args)>(args)..., this);
+                        if (awaitable.timeout_.tv_sec >= 0 && awaitable.timeout_.tv_nsec >= 0) {
+                            // TODO FIX FIX FIX rel/abs
+                            awaitable.io_.timeout(&awaitable.timeout_, 0, operation);
+                        }
                     },
                     std::move(awaitable.args_));
             }
@@ -118,15 +140,15 @@ public:
 
         auto operator co_await() { return Awaiter { *this }; }
 
+        void timeout(ChronoDuration ms) { setTimespec(timeout_, ms); }
+        void timeout(ChronoTimePoint tp) { setTimespec(timeout_, tp); }
+
     private:
         IoQueue& io_;
         Method method_;
         std::tuple<Args...> args_;
+        Timespec timeout_ = { -1, -1 };
     };
-
-    // These are both relative with respect to their arguments, but naming these is hard.
-    static void setRelativeTimeout(Timespec* ts, uint64_t milliseconds);
-    static void setAbsoluteTimeout(Timespec* ts, uint64_t milliseconds);
 
     IoQueue(size_t size = 1024, bool submissionQueuePolling = false);
 
@@ -157,10 +179,6 @@ public:
         return Awaitable(*this, &IoQueue::sendAwaiter, sockfd, buf, len);
     }
 
-    // timeout may be nullptr for convenience (which is equivalent to the function above)
-    OperationHandle send(int sockfd, const void* buf, size_t len, Timespec* timeout,
-        bool timeoutIsAbsolute, CompletionHandler cb);
-
     // res argument is received bytes
     OperationHandle recv(int sockfd, void* buf, size_t len, CompletionHandler cb);
 
@@ -170,9 +188,6 @@ public:
     {
         return Awaitable(*this, &IoQueue::recvAwaiter, sockfd, buf, len);
     }
-
-    OperationHandle recv(int sockfd, void* buf, size_t len, Timespec* timeout,
-        bool timeoutIsAbsolute, CompletionHandler cb);
 
     OperationHandle read(int fd, void* buf, size_t count, CompletionHandler cb);
 
@@ -254,18 +269,32 @@ public:
             *this, static_cast<TimeoutAwaiter>(&IoQueue::timeoutAwaiter), ts, count, flags);
     }
 
-    // sleep accuracy on linux is a few ms anyways, so millis is fine.
-    using Duration = std::chrono::milliseconds;
+    // The overloads that take non-pointer durations or time points keep a timespec in the
+    // completer, so you don't have to worry about ownership.
 
+    OperationHandle timeout(Duration* dur, CompletionHandler cb);
     OperationHandle timeout(Duration dur, CompletionHandler cb);
 
+    auto timeout(Duration* dur) { return timeout(dur, 0, 0); }
     Task<void> timeout(Duration dur);
 
-    using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
-
+    OperationHandle timeout(TimePoint* point, CompletionHandler cb);
     OperationHandle timeout(TimePoint point, CompletionHandler cb);
 
+    auto timeout(TimePoint* point) { return timeout(point, 0, IORING_TIMEOUT_ABS); }
     Task<void> timeout(TimePoint point);
+
+    // I have not figured out (some ideas, all bad) how to do the non-pointer versions of the
+    // following functions, because I don't have a handler for the timeout CQEs I could store the
+    // timespec in.
+
+    OperationHandle timeout(Timespec* ts, int flags, OperationHandle op);
+
+    OperationHandle timeout(Duration*, OperationHandle op);
+    // OperationHandle timeout(Duration dur, OperationHandle op);
+
+    OperationHandle timeout(TimePoint*, OperationHandle op);
+    // OperationHandle timeout(TimePoint dur, OperationHandle op);
 
     // The IoQueue has to take ownership of the future, because it will call .get() on it.
     template <typename T>
@@ -373,11 +402,13 @@ private:
     OperationHandle addSqe(io_uring_sqe* sqe, AwaiterBase* awaiter);
     OperationHandle addSqe(io_uring_sqe* sqe, GenericCompleter* awaiter);
 
-    OperationHandle addSqe(
-        io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, CompletionHandler cb);
-
     IoURing ring_;
     CompleterMap completers_;
     uint64_t nextUserData_ = 0;
+    // lastSqe_ is only used for link timeout optimization.
+    // We would keep a list of non-submitted SQEs and apply the link timeout optimization to all of
+    // them, but it's too much overhead and in the vast majority of cases you will do `timeout(dur,
+    // recv(fd, buf, len))` or something and it's this specific case that I want to optimize for.
+    io_uring_sqe* lastSqe_ = nullptr;
 };
 }
