@@ -389,6 +389,10 @@ void IoQueue::run()
 
 uint64_t IoQueue::addCompleter(void* completer)
 {
+    // Just skip the magic values
+    if (nextUserData_ == UserDataInvalid || nextUserData_ == UserDataIgnore) {
+        nextUserData_ = 0;
+    }
     const auto userData = nextUserData_;
     nextUserData_++;
     completers_.set(userData, completer);

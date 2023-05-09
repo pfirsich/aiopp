@@ -45,7 +45,7 @@ private:
 };
 
 class IoQueue {
-    static constexpr uint64_t UserDataInvalid = 0;
+    static constexpr uint64_t UserDataInvalid = std::numeric_limits<uint64_t>::max() - 1;
     static constexpr uint64_t UserDataIgnore = std::numeric_limits<uint64_t>::max();
 
 public:
