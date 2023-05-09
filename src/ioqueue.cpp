@@ -307,21 +307,22 @@ Task<void> IoQueue::timeout(TimePoint point)
 IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelHandler)
 {
     assert(operation);
+    const auto taggedPtr = completers_.get(operation.userData);
+    if (!taggedPtr) {
+        // The operation has already completed and there is no need to do anything.
+
+        // Currently we return a default constructed OperationHandle which is indistinguishable
+        // from not being able to issue the async cancelation, but considering there is no way
+        // to handle that case and the handler has been canceled, I don't think anyone will
+        // handle this.
+        return {};
+    }
+
     if (cancelHandler) {
         // We could remove the entry from completers_, but since we might still get a CQE for the
         // operation being cancelled, I would have to remove the assert in run() that makes sure
         // that there is an entry in completers_ and I think it could catch some bugs, so I want to
         // keep it.
-        const auto taggedPtr = completers_.get(operation.userData);
-        if (!taggedPtr) {
-            // The operation has already completed and there is no need to do anything.
-
-            // Currently we return a default constructed OperationHandle which is indistinguishable
-            // from not being able to issue the async cancelation, but considering there is no way
-            // to handle that case and the handler has been canceled, I don't think anyone will
-            // handle this.
-            return {};
-        }
         const auto [ptr, tags] = untagPointer(taggedPtr);
         if (tags.type == PointerTags::Type::Coroutine) {
             reinterpret_cast<CoroutineCompleter*>(ptr)->awaiter = nullptr;
@@ -331,6 +332,7 @@ IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelH
             reinterpret_cast<GenericCompleter*>(ptr)->clear();
         }
     }
+
     auto sqe = ring_.prepareAsyncCancel(operation.userData);
     if (!sqe) {
         return {};
