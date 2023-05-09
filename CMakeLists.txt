@@ -26,8 +26,17 @@ set(SRC
 )
 list(TRANSFORM SRC PREPEND src/)
 
+find_path(LIBURING_INCLUDE_DIR NAMES liburing.h)
+find_library(LIBURING_LIBRARY NAMES uring)
+
+if((NOT LIBURING_INCLUDE_DIR) OR(NOT LIBURING_LIBRARY))
+  message(FATAL_ERROR "Unable to find liburing")
+endif()
+
 add_library(aiopp ${SRC})
 target_include_directories(aiopp PUBLIC include)
+target_include_directories(aiopp PUBLIC ${LIBURING_INCLUDE_DIR})
+target_link_libraries(aiopp PUBLIC ${LIBURING_LIBRARY})
 set_wall(aiopp)
 
 find_package(spdlog REQUIRED)

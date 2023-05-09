@@ -3,16 +3,14 @@
 #include <cstdint>
 #include <optional>
 
-#include <linux/io_uring.h>
-#include <linux/openat2.h>
 #include <linux/time_types.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 
-namespace aiopp {
-// Heavily inspired by liburing
+#include <liburing.h>
 
+namespace aiopp {
 // THIS CLASS IS NOT THREAD-SAFE.
 // One could think about making it thread-safe, but it would introduce and
 // extra-cost that would have to be paid, even if it is used from a single thread. Also
@@ -24,25 +22,6 @@ namespace aiopp {
 class IoURing {
 public:
     using Timespec = __kernel_timespec;
-
-    struct CQEHandle {
-        const IoURing* ring = nullptr;
-        uint64_t userData;
-        int32_t res;
-
-        CQEHandle(const IoURing* ring, uint64_t userData, int32_t res);
-
-        CQEHandle(const CQEHandle&) = delete;
-        CQEHandle& operator=(const CQEHandle&) = delete;
-
-        CQEHandle(CQEHandle&& other);
-        CQEHandle& operator=(CQEHandle&& other);
-
-        ~CQEHandle();
-
-        void finish();
-        void release();
-    };
 
     IoURing() = default;
     ~IoURing();
@@ -61,16 +40,13 @@ public:
 
     const io_uring_params& getParams() const;
 
-    io_uring_cqe* peekCqe(unsigned* numAvailable = nullptr) const;
-    std::optional<CQEHandle> peekCqeHandle(unsigned* numAvailable = nullptr) const;
-    io_uring_cqe* waitCqe(size_t num = 1) const;
-    std::optional<CQEHandle> waitCqeHandle(size_t num = 1) const;
-    void advanceCq(size_t num = 1) const;
+    io_uring_cqe* peekCqe();
+    io_uring_cqe* waitCqe(size_t num = 1);
+    void advanceCq(size_t num = 1);
 
     size_t getNumSqeEntries() const;
     size_t getSqeCapacity() const;
     io_uring_sqe* getSqe();
-    size_t flushSqes(size_t num = 0);
     int submitSqes(size_t waitCqes = 0);
 
     io_uring_sqe* prepare(uint8_t opcode, int fd, uint64_t off, const void* addr, uint32_t len);
@@ -117,46 +93,7 @@ public:
     io_uring_sqe* prepareUnlinkat(int dirfd, const char* pathname, int flags = 0);
 
 private:
-    // For all of these elements are produced at the tail and consumed at the head.
-
-    struct IoSq {
-        void* ptr = nullptr;
-        size_t size = 0;
-
-        uint32_t* flags = nullptr;
-
-        uint32_t* head = nullptr;
-        uint32_t* tail = nullptr;
-        uint32_t* ringMask = nullptr;
-        uint32_t* indexArray = nullptr;
-
-        io_uring_sqe* entries = nullptr;
-        // The following three variables are the only ones that change after init() has finished.
-        size_t eHead = 0;
-        size_t eTail = 0;
-        // toSubmit keeps track of the elements that were flushed (to the index array) and that we
-        // have to submit with io_uring_enter.
-        size_t toSubmit = 0;
-    };
-
-    struct IoCq {
-        void* ptr = nullptr;
-        size_t size = 0;
-
-        uint32_t* head = nullptr;
-        uint32_t* tail = nullptr;
-        uint32_t* ringMask = nullptr;
-        io_uring_cqe* entries = nullptr;
-    };
-
-    void cleanup();
-    void release();
-
+    io_uring ring_;
     io_uring_params params_;
-
-    int ringFd_ = -1;
-
-    IoSq sq_;
-    IoCq cq_;
 };
 }
