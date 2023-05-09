@@ -343,7 +343,7 @@ IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelH
 
 void IoQueue::run()
 {
-    while (numOpsQueued_ > 0) {
+    while (completers_.size() > 0) {
         const auto res = ring_.submitSqes(1);
         if (res < 0) {
             getLogger().log(LogSeverity::Error, "Error submitting SQEs: " + errnoToString(errno));
@@ -381,7 +381,6 @@ void IoQueue::run()
                 completer->complete(IoResult(cqe->res));
                 delete completer;
             }
-            numOpsQueued_--;
             completers_.erase(cqe->user_data);
         }
         ring_.advanceCq();
@@ -402,7 +401,6 @@ IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, CompletionHandler cb
         getLogger().log(LogSeverity::Warning, "io_uring full");
         return {};
     }
-    numOpsQueued_++;
     sqe->user_data = addCompleter(tagPointer(
         new CallbackCompleter { std::move(cb) }, { .type = PointerTags::Type::Callback }));
     return { sqe->user_data };
@@ -414,7 +412,6 @@ IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, AwaiterBase* awaiter
         getLogger().log(LogSeverity::Warning, "io_uring full");
         return {};
     }
-    numOpsQueued_++;
     sqe->user_data = addCompleter(
         tagPointer(new CoroutineCompleter { awaiter }, { .type = PointerTags::Type::Coroutine }));
     return { sqe->user_data };
@@ -426,7 +423,6 @@ IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, GenericCompleter* co
         getLogger().log(LogSeverity::Warning, "io_uring full");
         return {};
     }
-    numOpsQueued_++;
     sqe->user_data = addCompleter(tagPointer(completer, { .type = PointerTags::Type::Generic }));
     return { sqe->user_data };
 }

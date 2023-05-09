@@ -312,8 +312,6 @@ public:
 
     void run();
 
-    size_t getNumOpsQueued() const { return numOpsQueued_; }
-
 private:
     struct GenericCompleter {
         virtual ~GenericCompleter() = default;
@@ -381,6 +379,5 @@ private:
     IoURing ring_;
     CompleterMap completers_;
     uint64_t nextUserData_ = 0;
-    size_t numOpsQueued_ = 0;
 };
 }
