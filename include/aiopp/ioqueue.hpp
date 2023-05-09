@@ -28,7 +28,7 @@ public:
     {
     }
 
-    std::error_code error() const { return std::make_error_code(static_cast<std::errc>(result_)); }
+    std::error_code error() const { return std::make_error_code(static_cast<std::errc>(-result_)); }
 
     int result() const
     {
