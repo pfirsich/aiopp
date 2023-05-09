@@ -361,8 +361,7 @@ void IoQueue::run()
         // I will keep it until it bothers me too much and I find out for a fact that it makes no
         // difference.
         if (cqe->user_data != UserDataIgnore) {
-            const auto taggedPtr = completers_.get(cqe->user_data);
-            assert(taggedPtr);
+            const auto taggedPtr = completers_.remove(cqe->user_data);
             const auto [ptr, tags] = untagPointer(taggedPtr);
             if (tags.type == PointerTags::Type::Coroutine) {
                 const auto completer = reinterpret_cast<CoroutineCompleter*>(ptr);
@@ -381,7 +380,6 @@ void IoQueue::run()
                 completer->complete(IoResult(cqe->res));
                 delete completer;
             }
-            completers_.erase(cqe->user_data);
         }
         ring_.advanceCq();
     }
@@ -395,7 +393,7 @@ uint64_t IoQueue::addCompleter(void* completer)
     }
     const auto userData = nextUserData_;
     nextUserData_++;
-    completers_.set(userData, completer);
+    completers_.insert(userData, completer);
     return userData;
 }
 
