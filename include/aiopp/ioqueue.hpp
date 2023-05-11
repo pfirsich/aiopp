@@ -128,6 +128,8 @@ public:
     static void setRelativeTimeout(Timespec* ts, uint64_t milliseconds);
     static void setAbsoluteTimeout(Timespec* ts, uint64_t milliseconds);
 
+    // SQ Polling is disabled by default, because while it does reduce the amount of syscalls, it
+    // barely increases throughput and noticably increases CPU usage when the queue is idling.
     IoQueue(size_t size = 1024, bool submissionQueuePolling = false);
 
     size_t getSize() const;
