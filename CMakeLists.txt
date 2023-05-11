@@ -77,3 +77,7 @@ set_wall(http-coro)
 add_executable(http examples/http.cpp)
 target_link_libraries(http example-lib)
 set_wall(http)
+
+add_executable(hashmapsim src/hashmapsim.cpp)
+target_link_libraries(hashmapsim example-lib)
+set_wall(hashmapsim)

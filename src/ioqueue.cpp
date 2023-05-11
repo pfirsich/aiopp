@@ -2,6 +2,7 @@
 
 #include <time.h>
 
+#include <fcntl.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
 
@@ -33,6 +34,13 @@ namespace {
         const auto type = static_cast<PointerTags::Type>(userData & 0b11);
         return { reinterpret_cast<void*>(ptr), PointerTags { .type = type } };
     }
+
+    struct MapAction {
+        enum class Action { Insert, Remove } action;
+        uint64_t key;
+    };
+
+    std::vector<MapAction> mapActions;
 }
 
 void IoQueue::setRelativeTimeout(Timespec* ts, uint64_t milliseconds)
@@ -54,6 +62,7 @@ void IoQueue::setAbsoluteTimeout(Timespec* ts, uint64_t milliseconds)
 IoQueue::IoQueue(size_t size, bool submissionQueuePolling)
     : completers_(size)
 {
+    mapActions.reserve(10 * 1000 * 1000);
     if (!ring_.init(size, submissionQueuePolling)) {
         getLogger().log(LogSeverity::Fatal, "Could not create io_uring: " + errnoToString(errno));
         std::exit(1);
@@ -344,6 +353,21 @@ IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelH
 void IoQueue::run()
 {
     while (completers_.size() > 0) {
+        if (completers_.size() == 1) {
+            Fd mapLogFd(::open("map_log", O_WRONLY | O_CREAT | O_TRUNC));
+            assert(mapLogFd != -1);
+            char buf[64];
+            for (const auto action : mapActions) {
+                int n = 0;
+                if (action.action == MapAction::Action::Insert) {
+                    n = std::snprintf(buf, sizeof(buf), "insert %lu\n", action.key);
+                } else if (action.action == MapAction::Action::Remove) {
+                    n = std::snprintf(buf, sizeof(buf), "remove %lu\n", action.key);
+                }
+                const auto w = ::write(mapLogFd, buf, n);
+                assert(w == n);
+            }
+        }
         const auto res = ring_.submitSqes(1);
         if (res < 0) {
             getLogger().log(LogSeverity::Error, "Error submitting SQEs: " + errnoToString(errno));
@@ -361,6 +385,7 @@ void IoQueue::run()
         // I will keep it until it bothers me too much and I find out for a fact that it makes no
         // difference.
         if (cqe->user_data != UserDataIgnore) {
+            mapActions.push_back(MapAction { MapAction::Action::Remove, cqe->user_data });
             const auto taggedPtr = completers_.remove(cqe->user_data);
             assert(taggedPtr);
             const auto [ptr, tags] = untagPointer(taggedPtr);
@@ -394,6 +419,7 @@ uint64_t IoQueue::addCompleter(void* completer)
     }
     const auto userData = nextUserData_;
     nextUserData_++;
+    mapActions.push_back(MapAction { MapAction::Action::Insert, userData });
     completers_.insert(userData, completer);
     return userData;
 }
