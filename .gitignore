@@ -4,3 +4,5 @@
 build/
 compile_commands.json
 untracked/
+perf*.data
+perf.data.old
