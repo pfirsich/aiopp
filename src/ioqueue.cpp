@@ -362,6 +362,7 @@ void IoQueue::run()
         // difference.
         if (cqe->user_data != UserDataIgnore) {
             const auto taggedPtr = completers_.remove(cqe->user_data);
+            assert(taggedPtr);
             const auto [ptr, tags] = untagPointer(taggedPtr);
             if (tags.type == PointerTags::Type::Coroutine) {
                 const auto completer = reinterpret_cast<CoroutineCompleter*>(ptr);
