@@ -15,7 +15,7 @@ public:
     virtual void log(LogSeverity severity, const std::string& message) = 0;
 };
 
-class FdLogger : public LoggerBase {
+class FdLogger final : public LoggerBase {
 public:
     FdLogger(int fd);
     void log(LogSeverity severity, const std::string& message) override;

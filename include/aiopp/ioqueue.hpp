@@ -322,7 +322,7 @@ private:
     };
 
     template <typename Storage>
-    struct StorageCallbackCompleter : public GenericCompleter {
+    struct StorageCallbackCompleter final : public GenericCompleter {
         CompletionHandler handler;
         Storage storage;
 
@@ -342,7 +342,7 @@ private:
     };
 
     template <typename Storage>
-    struct StorageCoroutineCompleter : public GenericCompleter {
+    struct StorageCoroutineCompleter final : public GenericCompleter {
         AwaiterBase* awaiter;
         Storage storage;
 

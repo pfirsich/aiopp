@@ -61,7 +61,7 @@ private:
     };
 
     template <typename Func>
-    struct Callable : public CallableBase {
+    struct Callable final : public CallableBase {
         // Afaik std::function employs the same "trick" of making the stored function mutable, so we
         // can a define single const operator(). The problem is that even const-overloading
         // operator() would fail to compile for mutable functors, because the definition of
