@@ -19,8 +19,6 @@ public:
 
     EventFd(Flags flags = Flags::None);
 
-    void read(IoQueue& io, Function<void(Result<uint64_t>)> callback) const;
-
     Task<Result<uint64_t>> read(IoQueue& io) const;
 
     void write(uint64_t v = 1) const;

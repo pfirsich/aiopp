@@ -9,32 +9,6 @@
 #include "aiopp/util.hpp"
 
 namespace aiopp {
-namespace {
-    struct PointerTags {
-        enum class Type { Coroutine = 0, Callback = 1, Generic = 2 };
-        Type type;
-    };
-
-    template <typename T>
-    void* tagPointer(T* ptr, PointerTags tags)
-    {
-        static_assert(std::alignment_of_v<T> >= 8);
-        auto userData = reinterpret_cast<uintptr_t>(ptr);
-        userData |= static_cast<int>(tags.type);
-        return reinterpret_cast<void*>(userData);
-    }
-
-    std::pair<void*, PointerTags> untagPointer(void* taggedPtr)
-    {
-        // The upper 16 bits are unused in x64 and since the types we are pointing to are aligned to
-        // at least 8 bytes, the lowest 3 bits are always 0 and can be used for tags;
-        const uint64_t userData = reinterpret_cast<uintptr_t>(taggedPtr);
-        const auto ptr = userData & (0x0000'ffff'ffff'fff0 | 0b11111000);
-        const auto type = static_cast<PointerTags::Type>(userData & 0b11);
-        return { reinterpret_cast<void*>(ptr), PointerTags { .type = type } };
-    }
-}
-
 void IoQueue::setRelativeTimeout(Timespec* ts, uint64_t milliseconds)
 {
     ts->tv_sec = milliseconds / 1000;
@@ -78,118 +52,54 @@ size_t IoQueue::getCapacity() const
     return ring_.getSqeCapacity();
 }
 
-IoQueue::OperationHandle IoQueue::accept(
-    int fd, ::sockaddr_in* addr, socklen_t* addrlen, CompletionHandler cb)
+IoQueue::OperationHandle IoQueue::accept(int fd, ::sockaddr_in* addr, socklen_t* addrlen)
 {
-    return addSqe(
-        ring_.prepareAccept(fd, reinterpret_cast<sockaddr*>(addr), addrlen), std::move(cb));
+    return setUserData(ring_.prepareAccept(fd, reinterpret_cast<sockaddr*>(addr), addrlen));
 }
 
-IoQueue::OperationHandle IoQueue::acceptAwaiter(
-    int fd, ::sockaddr_in* addr, socklen_t* addrlen, AwaiterBase* awaiter)
+IoQueue::OperationHandle IoQueue::connect(int sockfd, const ::sockaddr* addr, socklen_t addrlen)
 {
-    return addSqe(ring_.prepareAccept(fd, reinterpret_cast<sockaddr*>(addr), addrlen), awaiter);
+    return setUserData(ring_.prepareConnect(sockfd, addr, addrlen));
 }
 
-IoQueue::OperationHandle IoQueue::connect(
-    int sockfd, const ::sockaddr* addr, socklen_t addrlen, CompletionHandler cb)
+IoQueue::OperationHandle IoQueue::send(int sockfd, const void* buf, size_t len)
 {
-    return addSqe(ring_.prepareConnect(sockfd, addr, addrlen), std::move(cb));
+    return setUserData(ring_.prepareSend(sockfd, buf, len));
 }
 
-IoQueue::OperationHandle IoQueue::send(
-    int sockfd, const void* buf, size_t len, CompletionHandler cb)
+IoQueue::OperationHandle IoQueue::recv(int sockfd, void* buf, size_t len)
 {
-    return addSqe(ring_.prepareSend(sockfd, buf, len), std::move(cb));
+    return setUserData(ring_.prepareRecv(sockfd, buf, len));
 }
 
-IoQueue::OperationHandle IoQueue::sendAwaiter(
-    int sockfd, const void* buf, size_t len, AwaiterBase* awaiter)
+IoQueue::OperationHandle IoQueue::read(int fd, void* buf, size_t count)
 {
-    return addSqe(ring_.prepareSend(sockfd, buf, len), awaiter);
+    return setUserData(ring_.prepareRead(fd, buf, count));
 }
 
-IoQueue::OperationHandle IoQueue::send(int sockfd, const void* buf, size_t len,
-    IoQueue::Timespec* timeout, bool timeoutIsAbsolute, CompletionHandler cb)
+IoQueue::OperationHandle IoQueue::close(int fd)
 {
-    if (!timeout) {
-        return send(sockfd, buf, len, std::move(cb));
-    }
-    return addSqe(ring_.prepareSend(sockfd, buf, len), timeout, timeoutIsAbsolute, std::move(cb));
+    return setUserData(ring_.prepareClose(fd));
 }
 
-IoQueue::OperationHandle IoQueue::recv(int sockfd, void* buf, size_t len, CompletionHandler cb)
+IoQueue::OperationHandle IoQueue::shutdown(int fd, int how)
 {
-    return addSqe(ring_.prepareRecv(sockfd, buf, len), std::move(cb));
+    return setUserData(ring_.prepareShutdown(fd, how));
 }
 
-IoQueue::OperationHandle IoQueue::recvAwaiter(
-    int sockfd, void* buf, size_t len, AwaiterBase* awaiter)
+IoQueue::OperationHandle IoQueue::poll(int fd, short events)
 {
-    return addSqe(ring_.prepareRecv(sockfd, buf, len), awaiter);
+    return setUserData(ring_.preparePollAdd(fd, events));
 }
 
-IoQueue::OperationHandle IoQueue::recv(int sockfd, void* buf, size_t len,
-    IoQueue::Timespec* timeout, bool timeoutIsAbsolute, CompletionHandler cb)
+IoQueue::OperationHandle IoQueue::recvmsg(int sockfd, ::msghdr* msg, int flags)
 {
-    if (!timeout) {
-        return recv(sockfd, buf, len, std::move(cb));
-    }
-    return addSqe(ring_.prepareRecv(sockfd, buf, len), timeout, timeoutIsAbsolute, std::move(cb));
+    return setUserData(ring_.prepareRecvmsg(sockfd, msg, flags));
 }
 
-IoQueue::OperationHandle IoQueue::read(int fd, void* buf, size_t count, CompletionHandler cb)
+IoQueue::OperationHandle IoQueue::sendmsg(int sockfd, const ::msghdr* msg, int flags)
 {
-    return addSqe(ring_.prepareRead(fd, buf, count), std::move(cb));
-}
-
-IoQueue::OperationHandle IoQueue::readAwaiter(int fd, void* buf, size_t count, AwaiterBase* awaiter)
-{
-    return addSqe(ring_.prepareRead(fd, buf, count), awaiter);
-}
-
-IoQueue::OperationHandle IoQueue::close(int fd, CompletionHandler cb)
-{
-    return addSqe(ring_.prepareClose(fd), std::move(cb));
-}
-
-IoQueue::OperationHandle IoQueue::closeAwaiter(int fd, AwaiterBase* awaiter)
-{
-    return addSqe(ring_.prepareClose(fd), awaiter);
-}
-
-IoQueue::OperationHandle IoQueue::shutdown(int fd, int how, CompletionHandler cb)
-{
-    return addSqe(ring_.prepareShutdown(fd, how), std::move(cb));
-}
-
-IoQueue::OperationHandle IoQueue::poll(int fd, short events, CompletionHandler cb)
-{
-    return addSqe(ring_.preparePollAdd(fd, events), std::move(cb));
-}
-
-IoQueue::OperationHandle IoQueue::recvmsg(
-    int sockfd, ::msghdr* msg, int flags, CompletionHandler cb)
-{
-    return addSqe(ring_.prepareRecvmsg(sockfd, msg, flags), std::move(cb));
-}
-
-IoQueue::OperationHandle IoQueue::recvmsgAwaiter(
-    int sockfd, ::msghdr* msg, int flags, AwaiterBase* awaiter)
-{
-    return addSqe(ring_.prepareRecvmsg(sockfd, msg, flags), awaiter);
-}
-
-IoQueue::OperationHandle IoQueue::sendmsg(
-    int sockfd, const ::msghdr* msg, int flags, CompletionHandler cb)
-{
-    return addSqe(ring_.prepareSendmsg(sockfd, msg, flags), std::move(cb));
-}
-
-IoQueue::OperationHandle IoQueue::sendmsgAwaiter(
-    int sockfd, const ::msghdr* msg, int flags, AwaiterBase* awaiter)
-{
-    return addSqe(ring_.prepareSendmsg(sockfd, msg, flags), awaiter);
+    return setUserData(ring_.prepareSendmsg(sockfd, msg, flags));
 }
 
 namespace {
@@ -212,33 +122,17 @@ namespace {
     };
 }
 
-IoQueue::OperationHandle IoQueue::recvfrom(int sockfd, void* buf, size_t len, int flags,
-    ::sockaddr* srcAddr, socklen_t addrLen, CompletionHandler cb)
-{
-    auto msgHdr = std::make_unique<MsgHdr>(buf, len, srcAddr, addrLen);
-    return recvmsg(sockfd, &msgHdr->msg, flags, std::move(cb));
-}
-
 Task<IoResult> IoQueue::recvfrom(
-    int sockfd, void* buf, size_t len, int flags, ::sockaddr_in* srcAddr)
+    int sockfd, void* buf, size_t len, int flags, ::sockaddr* srcAddr, socklen_t addrLen)
 {
-    MsgHdr msgHdr(buf, len, srcAddr, sizeof(::sockaddr_in));
+    MsgHdr msgHdr(buf, len, srcAddr, addrLen);
     co_return co_await recvmsg(sockfd, &msgHdr.msg, flags);
 }
 
-IoQueue::OperationHandle IoQueue::sendto(int sockfd, const void* buf, size_t len, int flags,
-    const ::sockaddr* destAddr, socklen_t addrLen, CompletionHandler cb)
+Task<IoResult> IoQueue::sendto(int sockfd, const void* buf, size_t len, int flags,
+    const ::sockaddr* destAddr, socklen_t addrLen)
 {
-    auto msgHdr = std::make_unique<MsgHdr>(
-        const_cast<void*>(buf), len, const_cast<::sockaddr*>(destAddr), addrLen);
-    return sendmsg(sockfd, &msgHdr->msg, flags, std::move(cb));
-}
-
-Task<IoResult> IoQueue::sendto(
-    int sockfd, const void* buf, size_t len, int flags, const ::sockaddr_in* destAddr)
-{
-    MsgHdr msgHdr(
-        const_cast<void*>(buf), len, const_cast<::sockaddr_in*>(destAddr), sizeof(::sockaddr_in));
+    MsgHdr msgHdr(const_cast<void*>(buf), len, const_cast<::sockaddr*>(destAddr), addrLen);
     co_return co_await sendmsg(sockfd, &msgHdr.msg, flags);
 }
 
@@ -268,34 +162,15 @@ namespace {
     }
 }
 
-IoQueue::OperationHandle IoQueue::timeout(
-    Timespec* ts, uint64_t count, uint32_t flags, CompletionHandler cb)
+IoQueue::OperationHandle IoQueue::timeout(Timespec* ts, uint64_t count, uint32_t flags)
 {
-    return addSqe(ring_.prepareTimeout(ts, count, flags), std::move(cb));
-}
-
-IoQueue::OperationHandle IoQueue::timeoutAwaiter(
-    Timespec* ts, uint64_t count, uint32_t flags, AwaiterBase* awaiter)
-{
-    return addSqe(ring_.prepareTimeout(ts, count, flags), awaiter);
-}
-
-IoQueue::OperationHandle IoQueue::timeout(Duration dur, CompletionHandler cb)
-{
-    auto ts = std::make_unique<Timespec>(toTimespec(dur));
-    return timeout(ts.get(), 0, 0, std::move(cb));
+    return setUserData(ring_.prepareTimeout(ts, count, flags));
 }
 
 Task<void> IoQueue::timeout(Duration dur)
 {
     auto ts = toTimespec(dur);
     co_await timeout(&ts, 0, 0);
-}
-
-IoQueue::OperationHandle IoQueue::timeout(TimePoint point, CompletionHandler cb)
-{
-    auto ts = std::make_unique<Timespec>(toTimespec(point));
-    return timeout(ts.get(), 0, 0, std::move(cb));
 }
 
 Task<void> IoQueue::timeout(TimePoint point)
@@ -307,30 +182,11 @@ Task<void> IoQueue::timeout(TimePoint point)
 IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelHandler)
 {
     assert(operation);
-    const auto taggedPtr = completers_.get(operation.userData);
-    if (!taggedPtr) {
-        // The operation has already completed and there is no need to do anything.
-
-        // Currently we return a default constructed OperationHandle which is indistinguishable
-        // from not being able to issue the async cancelation, but considering there is no way
-        // to handle that case and the handler has been canceled, I don't think anyone will
-        // handle this.
-        return {};
-    }
 
     if (cancelHandler) {
-        // We could remove the entry from completers_, but since we might still get a CQE for the
-        // operation being cancelled, I would have to remove the assert in run() that makes sure
-        // that there is an entry in completers_ and I think it could catch some bugs, so I want to
-        // keep it.
-        const auto [ptr, tags] = untagPointer(taggedPtr);
-        if (tags.type == PointerTags::Type::Coroutine) {
-            reinterpret_cast<CoroutineCompleter*>(ptr)->awaiter = nullptr;
-        } else if (tags.type == PointerTags::Type::Callback) {
-            reinterpret_cast<CallbackCompleter*>(ptr)->handler = nullptr;
-        } else if (tags.type == PointerTags::Type::Generic) {
-            reinterpret_cast<GenericCompleter*>(ptr)->clear();
-        }
+        const auto ptr = completers_.remove(operation.userData);
+        const auto completer = reinterpret_cast<Completer*>(ptr);
+        delete completer;
     }
 
     auto sqe = ring_.prepareAsyncCancel(operation.userData);
@@ -338,7 +194,7 @@ IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelH
         return {};
     }
     sqe->user_data = UserDataIgnore;
-    return { sqe->user_data };
+    return { this, sqe->user_data };
 }
 
 void IoQueue::run()
@@ -354,31 +210,11 @@ void IoQueue::run()
             continue;
         }
 
-        // It's possible the pointer tagging and the two special cases for coroutines and callbacks
-        // are absolutely not necessary, but it's right here that I think they might be, because
-        // they would not be inlined if they were virtual function calls. At the same time we will
-        // call a function (type-erased) directly after, so maybe it makes no difference after all.
-        // I will keep it until it bothers me too much and I find out for a fact that it makes no
-        // difference.
         if (cqe->user_data != UserDataIgnore) {
-            const auto taggedPtr = completers_.remove(cqe->user_data);
-            assert(taggedPtr);
-            const auto [ptr, tags] = untagPointer(taggedPtr);
-            if (tags.type == PointerTags::Type::Coroutine) {
-                const auto completer = reinterpret_cast<CoroutineCompleter*>(ptr);
-                if (completer->awaiter) {
-                    completer->awaiter->complete(IoResult(cqe->res));
-                }
-                delete completer;
-            } else if (tags.type == PointerTags::Type::Callback) {
-                const auto completer = reinterpret_cast<CallbackCompleter*>(ptr);
-                if (completer->handler) {
-                    completer->handler(IoResult(cqe->res));
-                }
-                delete completer;
-            } else if (tags.type == PointerTags::Type::Generic) {
-                const auto completer = reinterpret_cast<GenericCompleter*>(ptr);
-                completer->complete(IoResult(cqe->res));
+            const auto ptr = completers_.remove(cqe->user_data);
+            if (ptr) {
+                const auto completer = reinterpret_cast<Completer*>(ptr);
+                completer->complete(cqe->res);
                 delete completer;
             }
         }
@@ -386,7 +222,12 @@ void IoQueue::run()
     }
 }
 
-uint64_t IoQueue::addCompleter(void* completer)
+void IoQueue::setCompleter(OperationHandle operation, std::unique_ptr<Completer> completer)
+{
+    completers_.insert(operation.userData, completer.release());
+}
+
+IoQueue::OperationHandle IoQueue::setUserData(io_uring_sqe* sqe)
 {
     // Just skip the magic values
     if (nextUserData_ == UserDataInvalid || nextUserData_ == UserDataIgnore) {
@@ -394,55 +235,12 @@ uint64_t IoQueue::addCompleter(void* completer)
     }
     const auto userData = nextUserData_;
     nextUserData_++;
-    completers_.insert(userData, completer);
-    return userData;
-}
 
-IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, CompletionHandler cb)
-{
     if (!sqe) {
         getLogger().log(LogSeverity::Warning, "io_uring full");
         return {};
     }
-    sqe->user_data = addCompleter(tagPointer(
-        new CallbackCompleter { std::move(cb) }, { .type = PointerTags::Type::Callback }));
-    return { sqe->user_data };
-}
-
-IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, AwaiterBase* awaiter)
-{
-    if (!sqe) {
-        getLogger().log(LogSeverity::Warning, "io_uring full");
-        return {};
-    }
-    sqe->user_data = addCompleter(
-        tagPointer(new CoroutineCompleter { awaiter }, { .type = PointerTags::Type::Coroutine }));
-    return { sqe->user_data };
-}
-
-IoQueue::OperationHandle IoQueue::addSqe(io_uring_sqe* sqe, GenericCompleter* completer)
-{
-    if (!sqe) {
-        getLogger().log(LogSeverity::Warning, "io_uring full");
-        return {};
-    }
-    sqe->user_data = addCompleter(tagPointer(completer, { .type = PointerTags::Type::Generic }));
-    return { sqe->user_data };
-}
-
-IoQueue::OperationHandle IoQueue::addSqe(
-    io_uring_sqe* sqe, Timespec* timeout, bool timeoutIsAbsolute, CompletionHandler cb)
-{
-    if (!addSqe(sqe, std::move(cb))) {
-        return {};
-    }
-    sqe->flags |= IOSQE_IO_LINK;
-    // If the timeout does not fit into the SQ, that's fine. We don't want to undo the whole thing.
-    // In the future the use of timeouts might be more critical and this should be reconsidered.
-    auto timeoutSqe = ring_.prepareLinkTimeout(timeout, timeoutIsAbsolute ? IORING_TIMEOUT_ABS : 0);
-    if (timeoutSqe) {
-        timeoutSqe->user_data = UserDataIgnore;
-    }
-    return { sqe->user_data };
+    sqe->user_data = userData;
+    return { this, sqe->user_data };
 }
 }

@@ -2,6 +2,8 @@
 
 #include <coroutine>
 
+#include "aiopp/basiccoroutine.hpp"
+
 namespace aiopp {
 template <typename Result = void>
 class [[nodiscard]] Task {
@@ -69,6 +71,12 @@ public:
     };
 
     auto operator co_await() noexcept { return Awaiter { handle_ }; }
+
+    template <typename Func>
+    BasicCoroutine callback(Func func)
+    {
+        func(co_await *this);
+    }
 
 private:
     explicit Task(std::coroutine_handle<Promise> handle)

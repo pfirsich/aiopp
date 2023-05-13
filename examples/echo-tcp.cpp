@@ -34,15 +34,15 @@ private:
     private:
         void close()
         {
-            server_.io_.close(fd_, [](IoResult) {});
+            server_.io_.close(fd_).callback([](IoResult) {});
         }
 
         void receive(std::unique_ptr<Session> self)
         {
             recvBuffer_.clear();
             recvBuffer_.append(2048, '\0');
-            server_.io_.recv(fd_, recvBuffer_.data(), recvBuffer_.size(),
-                [this, self = std::move(self)](IoResult readBytes) mutable {
+            server_.io_.recv(fd_, recvBuffer_.data(), recvBuffer_.size())
+                .callback([this, self = std::move(self)](IoResult readBytes) mutable {
                     if (!readBytes) {
                         spdlog::error("Error in recv: {}", readBytes.error().message());
                         close();
@@ -68,9 +68,9 @@ private:
         void sendResponse(std::unique_ptr<Session> self)
         {
             assert(sendOffset_ < recvBuffer_.size());
-            server_.io_.send(fd_, recvBuffer_.data() + sendOffset_,
-                recvBuffer_.size() - sendOffset_,
-                [this, self = std::move(self)](IoResult sentBytes) mutable {
+            server_.io_
+                .send(fd_, recvBuffer_.data() + sendOffset_, recvBuffer_.size() - sendOffset_)
+                .callback([this, self = std::move(self)](IoResult sentBytes) mutable {
                     if (!sentBytes) {
                         spdlog::error("Error in send: {}", sentBytes.error().message());
                         close();
@@ -103,12 +103,12 @@ private:
     {
         bool added = false;
         while (!added) {
-            added = io_.accept(listenSocket_, nullptr, nullptr,
-                           [this](IoResult result) {
-                               handleAccept(result);
-                               accept();
-                           })
-                        .valid();
+            auto op = io_.accept(listenSocket_, nullptr, nullptr);
+            added = op.valid();
+            op.callback([this](IoResult result) {
+                handleAccept(result);
+                accept();
+            });
         }
     }
 

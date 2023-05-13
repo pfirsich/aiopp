@@ -11,19 +11,6 @@ EventFd::EventFd(Flags flags)
     assert(fd_ != -1);
 }
 
-void EventFd::read(IoQueue& io, Function<void(Result<uint64_t>)> callback) const
-{
-    auto readBuf = std::make_unique<uint64_t>();
-    io.read(fd_, readBuf.get(), sizeof(uint64_t),
-        [callback = std::move(callback), readBuf = std::move(readBuf)](IoResult result) {
-            if (result) {
-                callback(*readBuf);
-            } else {
-                callback(error(result.error()));
-            }
-        });
-}
-
 Task<Result<uint64_t>> EventFd::read(IoQueue& io) const
 {
     uint64_t buf = 0;

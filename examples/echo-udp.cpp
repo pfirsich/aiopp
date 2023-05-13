@@ -19,8 +19,8 @@ private:
     void receive()
     {
         receiveBuffer_.resize(1024, 0);
-        io_.recvfrom(socket_, receiveBuffer_.data(), receiveBuffer_.size(), 0, &clientAddr_,
-            [this](IoResult receivedBytes) {
+        io_.recvfrom(socket_, receiveBuffer_.data(), receiveBuffer_.size(), 0, &clientAddr_)
+            .callback([this](IoResult receivedBytes) {
                 if (!receivedBytes) {
                     spdlog::error("Error in recvfrom: {}", receivedBytes.error().message());
                     receive();
@@ -34,8 +34,8 @@ private:
 
     void respond()
     {
-        io_.sendto(socket_, receiveBuffer_.data(), receiveBuffer_.size(), 0, &clientAddr_,
-            [this](IoResult sentBytes) {
+        io_.sendto(socket_, receiveBuffer_.data(), receiveBuffer_.size(), 0, &clientAddr_)
+            .callback([this](IoResult sentBytes) {
                 if (!sentBytes) {
                     spdlog::error("Error in sendto: {}", sentBytes.error().message());
                 }
