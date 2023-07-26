@@ -81,21 +81,21 @@ public:
         bool valid() const { return io && userData != UserDataInvalid; }
         explicit operator bool() const { return valid(); }
 
-        void setCompleter(std::unique_ptr<Completer> completer)
+        void setCompleter(std::unique_ptr<Completer> completer) const
         {
             io->setCompleter(*this, std::move(completer));
         }
 
-        void cancel() { io->cancel(*this, true); }
+        void cancel() const { io->cancel(*this, true); }
 
-        auto operator co_await()
+        auto operator co_await() const
         {
             assert(*this);
             return OperationAwaiter { *this };
         }
 
         template <typename Func>
-        BasicCoroutine callback(Func func)
+        BasicCoroutine callback(Func func) const
         {
             func(co_await *this);
         }
