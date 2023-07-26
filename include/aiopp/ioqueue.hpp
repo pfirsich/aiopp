@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <chrono>
 #include <coroutine>
 #include <future>
 #include <limits>
@@ -51,6 +52,24 @@ class IoQueue {
 
 public:
     using Timespec = IoURing::Timespec;
+    // sleep accuracy on linux is a few ms anyways, so I think millis is fine.
+    using ChronoDuration = std::chrono::milliseconds;
+    using ChronoTimePoint = std::chrono::time_point<std::chrono::steady_clock>;
+
+    static void setTimespec(Timespec& ts, ChronoDuration duration);
+    static void setTimespec(Timespec& ts, ChronoTimePoint tp);
+
+    struct Duration : public Timespec {
+        Duration() = default;
+        Duration(ChronoDuration ms);
+        void set(ChronoDuration ms);
+    };
+
+    struct TimePoint : public Timespec {
+        TimePoint() = default;
+        TimePoint(ChronoTimePoint tp);
+        void set(ChronoTimePoint tp);
+    };
 
     struct OperationAwaiter;
 
@@ -125,10 +144,6 @@ public:
         IoResult await_resume() const noexcept { return result; }
     };
 
-    // These are both relative with respect to their arguments, but naming these is hard.
-    static void setRelativeTimeout(Timespec* ts, uint64_t milliseconds);
-    static void setAbsoluteTimeout(Timespec* ts, uint64_t milliseconds);
-
     // SQ Polling is disabled by default, because while it does reduce the amount of syscalls, it
     // barely increases throughput and noticably increases CPU usage when the queue is idling.
     IoQueue(size_t size = 1024, bool submissionQueuePolling = false);
@@ -182,16 +197,15 @@ public:
             sizeof(SockAddr));
     }
 
-    OperationHandle timeout(Timespec* ts, uint64_t count, uint32_t flags);
+    OperationHandle timeout(Timespec* ts, uint32_t flags);
+    Task<IoResult> timeout(Duration dur);
+    Task<IoResult> timeout(TimePoint tp);
 
-    // sleep accuracy on linux is a few ms anyways, so millis is fine.
-    using Duration = std::chrono::milliseconds;
-
-    Task<void> timeout(Duration dur);
-
-    using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
-
-    Task<void> timeout(TimePoint point);
+    // The passed operation will return ECANCELED in case the timeout expired.
+    OperationHandle linkTimeout(Timespec* ts, int flags, OperationHandle op);
+    Task<IoResult> timeout(Timespec* ts, int flags, OperationHandle op);
+    Task<IoResult> timeout(Duration dur, OperationHandle op);
+    Task<IoResult> timeout(TimePoint tp, OperationHandle op);
 
     template <typename T>
     Task<T> wait(Future<T> future)
@@ -219,11 +233,13 @@ public:
     void run();
 
 private:
-    OperationHandle setUserData(io_uring_sqe* sqe);
+    OperationHandle finalizeSqe(io_uring_sqe* sqe, uint64_t userData);
+    OperationHandle finalizeSqe(io_uring_sqe* sqe);
     void setCompleter(OperationHandle operation, std::unique_ptr<Completer> completer);
 
     IoURing ring_;
     CompleterMap completers_;
     uint64_t nextUserData_ = 0;
+    io_uring_sqe* lastSqe_ = nullptr;
 };
 }

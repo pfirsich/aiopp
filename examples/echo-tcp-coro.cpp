@@ -33,7 +33,13 @@ BasicCoroutine echo(IoQueue& io, Fd socket)
 {
     while (true) {
         std::string recvBuffer(1024, '\0');
-        const auto receivedBytes = co_await io.recv(socket, recvBuffer.data(), recvBuffer.size());
+        const auto receivedBytes = co_await io.timeout(
+            std::chrono::milliseconds(5000), io.recv(socket, recvBuffer.data(), recvBuffer.size()));
+        if (!receivedBytes && receivedBytes.error() == std::errc::operation_canceled) {
+            co_await sendAll(io, socket, "Session timed out. Bye!");
+            break;
+        }
+
         if (!receivedBytes) {
             spdlog::error("Error in receive: {}", receivedBytes.error().message());
             break;

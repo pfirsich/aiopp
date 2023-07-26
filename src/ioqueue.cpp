@@ -9,20 +9,46 @@
 #include "aiopp/util.hpp"
 
 namespace aiopp {
-void IoQueue::setRelativeTimeout(Timespec* ts, uint64_t milliseconds)
+void IoQueue::setTimespec(Timespec& ts, std::chrono::milliseconds ms)
 {
-    ts->tv_sec = milliseconds / 1000;
-    ts->tv_nsec = (milliseconds % 1000) * 1000 * 1000;
+    ts.tv_sec = ms.count() / 1000;
+    ts.tv_nsec = (ms.count() % 1000) * 1000 * 1000;
 }
 
-void IoQueue::setAbsoluteTimeout(Timespec* ts, uint64_t milliseconds)
+void IoQueue::setTimespec(Timespec& ts, std::chrono::time_point<std::chrono::steady_clock> tp)
 {
+    const auto now = std::chrono::steady_clock::now();
+    assert(now >= tp);
+    const auto delta = tp - now;
+    const auto deltaMs = std::chrono::duration_cast<std::chrono::milliseconds>(delta).count();
+
     ::timespec nowTs;
     ::clock_gettime(CLOCK_MONOTONIC, &nowTs);
-    ts->tv_sec = nowTs.tv_sec + milliseconds / 1000;
-    ts->tv_nsec = nowTs.tv_nsec + (milliseconds % 1000) * 1000 * 1000;
-    ts->tv_sec += ts->tv_nsec / (1000 * 1000 * 1000);
-    ts->tv_nsec = ts->tv_nsec % (1000 * 1000 * 1000);
+
+    ts.tv_sec = nowTs.tv_sec + deltaMs / 1000;
+    ts.tv_nsec = nowTs.tv_nsec + (deltaMs % 1000) * 1000 * 1000;
+    ts.tv_sec += ts.tv_nsec / (1000 * 1000 * 1000);
+    ts.tv_nsec = ts.tv_nsec % (1000 * 1000 * 1000);
+}
+
+IoQueue::Duration::Duration(std::chrono::milliseconds ms)
+{
+    set(ms);
+}
+
+void IoQueue::Duration::set(std::chrono::milliseconds ms)
+{
+    setTimespec(*this, ms);
+}
+
+IoQueue::TimePoint::TimePoint(std::chrono::time_point<std::chrono::steady_clock> tp)
+{
+    set(tp);
+}
+
+void IoQueue::TimePoint::set(std::chrono::time_point<std::chrono::steady_clock> tp)
+{
+    setTimespec(*this, tp);
 }
 
 IoQueue::IoQueue(size_t size, bool submissionQueuePolling)
@@ -54,52 +80,52 @@ size_t IoQueue::getCapacity() const
 
 IoQueue::OperationHandle IoQueue::accept(int fd, ::sockaddr_in* addr, socklen_t* addrlen)
 {
-    return setUserData(ring_.prepareAccept(fd, reinterpret_cast<sockaddr*>(addr), addrlen));
+    return finalizeSqe(ring_.prepareAccept(fd, reinterpret_cast<sockaddr*>(addr), addrlen));
 }
 
 IoQueue::OperationHandle IoQueue::connect(int sockfd, const ::sockaddr* addr, socklen_t addrlen)
 {
-    return setUserData(ring_.prepareConnect(sockfd, addr, addrlen));
+    return finalizeSqe(ring_.prepareConnect(sockfd, addr, addrlen));
 }
 
 IoQueue::OperationHandle IoQueue::send(int sockfd, const void* buf, size_t len)
 {
-    return setUserData(ring_.prepareSend(sockfd, buf, len));
+    return finalizeSqe(ring_.prepareSend(sockfd, buf, len));
 }
 
 IoQueue::OperationHandle IoQueue::recv(int sockfd, void* buf, size_t len)
 {
-    return setUserData(ring_.prepareRecv(sockfd, buf, len));
+    return finalizeSqe(ring_.prepareRecv(sockfd, buf, len));
 }
 
 IoQueue::OperationHandle IoQueue::read(int fd, void* buf, size_t count)
 {
-    return setUserData(ring_.prepareRead(fd, buf, count));
+    return finalizeSqe(ring_.prepareRead(fd, buf, count));
 }
 
 IoQueue::OperationHandle IoQueue::close(int fd)
 {
-    return setUserData(ring_.prepareClose(fd));
+    return finalizeSqe(ring_.prepareClose(fd));
 }
 
 IoQueue::OperationHandle IoQueue::shutdown(int fd, int how)
 {
-    return setUserData(ring_.prepareShutdown(fd, how));
+    return finalizeSqe(ring_.prepareShutdown(fd, how));
 }
 
 IoQueue::OperationHandle IoQueue::poll(int fd, short events)
 {
-    return setUserData(ring_.preparePollAdd(fd, events));
+    return finalizeSqe(ring_.preparePollAdd(fd, events));
 }
 
 IoQueue::OperationHandle IoQueue::recvmsg(int sockfd, ::msghdr* msg, int flags)
 {
-    return setUserData(ring_.prepareRecvmsg(sockfd, msg, flags));
+    return finalizeSqe(ring_.prepareRecvmsg(sockfd, msg, flags));
 }
 
 IoQueue::OperationHandle IoQueue::sendmsg(int sockfd, const ::msghdr* msg, int flags)
 {
-    return setUserData(ring_.prepareSendmsg(sockfd, msg, flags));
+    return finalizeSqe(ring_.prepareSendmsg(sockfd, msg, flags));
 }
 
 namespace {
@@ -136,47 +162,49 @@ Task<IoResult> IoQueue::sendto(int sockfd, const void* buf, size_t len, int flag
     co_return co_await sendmsg(sockfd, &msgHdr.msg, flags);
 }
 
-namespace {
-    IoQueue::Timespec toTimespec(std::chrono::milliseconds dur)
-    {
-        IoQueue::Timespec ts;
-        ts.tv_sec = dur.count() / 1000;
-        ts.tv_nsec = (dur.count() % 1000) * 1000 * 1000;
-        return ts;
+IoQueue::OperationHandle IoQueue::timeout(Timespec* ts, uint32_t flags)
+{
+    return finalizeSqe(ring_.prepareTimeout(ts, 0, flags));
+}
+
+Task<IoResult> IoQueue::timeout(Duration dur)
+{
+    co_return co_await timeout(&dur, 0);
+}
+
+Task<IoResult> IoQueue::timeout(TimePoint tp)
+{
+    co_return co_await timeout(&tp, IORING_TIMEOUT_ABS);
+}
+
+IoQueue::OperationHandle IoQueue::linkTimeout(Timespec* ts, int flags, OperationHandle op)
+{
+    assert(op);
+    assert(lastSqe_ && lastSqe_->user_data == op.userData);
+    lastSqe_->flags |= IOSQE_IO_LINK;
+    if (!finalizeSqe(ring_.prepareLinkTimeout(ts, flags), UserDataIgnore)) {
+        return {};
     }
-
-    IoQueue::Timespec toTimespec(std::chrono::time_point<std::chrono::steady_clock> point)
-    {
-        const auto now = std::chrono::steady_clock::now();
-        assert(now >= point);
-        const auto delta = point - std::chrono::steady_clock::now();
-        const auto deltaMs = std::chrono::duration_cast<std::chrono::milliseconds>(delta).count();
-        ::timespec nowTs;
-        ::clock_gettime(CLOCK_MONOTONIC, &nowTs);
-        IoQueue::Timespec ts;
-        ts.tv_sec = nowTs.tv_sec + deltaMs / 1000;
-        ts.tv_nsec = nowTs.tv_nsec + (deltaMs % 1000) * 1000 * 1000;
-        ts.tv_sec += ts.tv_nsec / (1000 * 1000 * 1000);
-        ts.tv_nsec = ts.tv_nsec % (1000 * 1000 * 1000);
-        return ts;
-    }
+    return op;
 }
 
-IoQueue::OperationHandle IoQueue::timeout(Timespec* ts, uint64_t count, uint32_t flags)
+Task<IoResult> IoQueue::timeout(Timespec* ts, int flags, OperationHandle op)
 {
-    return setUserData(ring_.prepareTimeout(ts, count, flags));
+    // TODO: Make this function check if op is lastSqe_ and if not, issue a regular timeout
+    // operation that does cancel(op, false) when it completes with ETIME.
+    // I think I need to await multiple operations (op and timeout) simultaneously for this, which
+    // is why I put it off for now.
+    co_return co_await linkTimeout(ts, flags, op);
 }
 
-Task<void> IoQueue::timeout(Duration dur)
+Task<IoResult> IoQueue::timeout(Duration dur, OperationHandle op)
 {
-    auto ts = toTimespec(dur);
-    co_await timeout(&ts, 0, 0);
+    co_return co_await timeout(&dur, 0, op);
 }
 
-Task<void> IoQueue::timeout(TimePoint point)
+Task<IoResult> IoQueue::timeout(TimePoint tp, OperationHandle op)
 {
-    auto ts = toTimespec(point);
-    co_await timeout(&ts, 0, IORING_TIMEOUT_ABS);
+    co_return co_await timeout(&tp, IORING_TIMEOUT_ABS, op);
 }
 
 IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelHandler)
@@ -189,17 +217,13 @@ IoQueue::OperationHandle IoQueue::cancel(OperationHandle operation, bool cancelH
         delete completer;
     }
 
-    auto sqe = ring_.prepareAsyncCancel(operation.userData);
-    if (!sqe) {
-        return {};
-    }
-    sqe->user_data = UserDataIgnore;
-    return { this, sqe->user_data };
+    return finalizeSqe(ring_.prepareAsyncCancel(operation.userData), UserDataIgnore);
 }
 
 void IoQueue::run()
 {
     while (completers_.size() > 0) {
+        lastSqe_ = nullptr;
         const auto res = ring_.submitSqes(1);
         if (res < 0) {
             getLogger().log(LogSeverity::Error, "Error submitting SQEs: " + errnoToString(errno));
@@ -227,7 +251,18 @@ void IoQueue::setCompleter(OperationHandle operation, std::unique_ptr<Completer>
     completers_.insert(operation.userData, completer.release());
 }
 
-IoQueue::OperationHandle IoQueue::setUserData(io_uring_sqe* sqe)
+IoQueue::OperationHandle IoQueue::finalizeSqe(io_uring_sqe* sqe, uint64_t userData)
+{
+    if (!sqe) {
+        getLogger().log(LogSeverity::Warning, "io_uring full");
+        return {};
+    }
+    sqe->user_data = userData;
+    lastSqe_ = sqe;
+    return { this, sqe->user_data };
+}
+
+IoQueue::OperationHandle IoQueue::finalizeSqe(io_uring_sqe* sqe)
 {
     // Just skip the magic values
     if (nextUserData_ == UserDataInvalid || nextUserData_ == UserDataIgnore) {
@@ -235,12 +270,6 @@ IoQueue::OperationHandle IoQueue::setUserData(io_uring_sqe* sqe)
     }
     const auto userData = nextUserData_;
     nextUserData_++;
-
-    if (!sqe) {
-        getLogger().log(LogSeverity::Warning, "io_uring full");
-        return {};
-    }
-    sqe->user_data = userData;
-    return { this, sqe->user_data };
+    return finalizeSqe(sqe, userData);
 }
 }
