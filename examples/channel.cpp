@@ -15,7 +15,7 @@ ThreadPool& threadPool()
     return tp;
 }
 
-BasicCoroutine receiver(std::string id, IoQueue& io, Channel<std::string>& channel)
+BasicCoroutine receiver(std::string id, Channel<std::string>& channel)
 {
     while (true) {
         const auto msg = co_await channel.receive();
@@ -44,8 +44,8 @@ int main()
 {
     IoQueue io;
     Channel<std::string> channel(io);
-    receiver("1", io, channel);
-    receiver("2", io, channel);
+    receiver("1", channel);
+    receiver("2", channel);
     sender(io, channel);
     io.run();
 }
