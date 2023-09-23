@@ -18,7 +18,7 @@ struct IpAddress {
 
     std::string toString() const;
 
-    uint32_t ipv4;
+    uint32_t ipv4; // in network byte order!
 };
 
 Fd createSocket(SocketType type);

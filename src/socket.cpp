@@ -77,7 +77,7 @@ bool bind(const Fd& socket, const IpAddress& address, uint16_t port)
     ::sockaddr_in sa;
     std::memset(&sa, 0, sizeof(sa));
     sa.sin_family = AF_INET;
-    sa.sin_addr.s_addr = htonl(address.ipv4);
+    sa.sin_addr.s_addr = address.ipv4;
     sa.sin_port = htons(port);
 
     if (::bind(socket, reinterpret_cast<const ::sockaddr*>(&sa), sizeof(sa)) == -1) {
