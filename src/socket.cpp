@@ -81,7 +81,9 @@ bool bind(const Fd& socket, const IpAddress& address, uint16_t port)
     sa.sin_port = htons(port);
 
     if (::bind(socket, reinterpret_cast<const ::sockaddr*>(&sa), sizeof(sa)) == -1) {
-        getLogger().log(LogSeverity::Error, "Error binding socket to: " + errnoToString(errno));
+        getLogger().log(LogSeverity::Error,
+            "Error binding socket to " + address.toString() + ":" + std::to_string(port) + ": "
+                + errnoToString(errno));
         return false;
     }
 
