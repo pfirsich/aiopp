@@ -1,5 +1,6 @@
 #include "aiopp/socket.hpp"
 
+#include <charconv>
 #include <cstring>
 
 #include <arpa/inet.h>
@@ -18,14 +19,46 @@ std::optional<IpAddress> IpAddress::parse(const std::string& str)
     return addr.s_addr;
 }
 
-IpAddress::IpAddress(uint32_t ipv4Addr)
-    : ipv4(ipv4Addr)
-{
-}
-
 std::string IpAddress::toString() const
 {
     return ::inet_ntoa(::in_addr { ipv4 });
+}
+
+std::optional<IpAddressPort> IpAddressPort::parse(const std::string& str)
+{
+    const auto portDelim = str.find(':');
+    if (portDelim == std::string::npos) {
+        // I could return an IpAddressPort with port = 0, but I think
+        // I will catch more mistakes by failing here.
+        return std::nullopt;
+    }
+    const auto ipStr = str.substr(0, portDelim);
+    const auto ip = IpAddress::parse(ipStr);
+    if (!ip) {
+        return std::nullopt;
+    }
+    uint16_t port = 0;
+    const auto portSv = std::string_view { str }.substr(portDelim + 1);
+    const auto [ptr, ec] = std::from_chars(&portSv.front(), &portSv.back() + 1, port);
+    if (ec != std::errc() || ptr != &portSv.back() + 1) {
+        return std::nullopt;
+    }
+    return IpAddressPort(*ip, port);
+}
+
+std::string IpAddressPort::toString() const
+{
+    return address.toString() + ":" + std::to_string(port);
+}
+
+::sockaddr_in IpAddressPort::getSockAddr() const
+{
+    ::sockaddr_in sa;
+    std::memset(&sa, 0, sizeof(sa));
+    sa.sin_family = AF_INET;
+    sa.sin_addr.s_addr = address.ipv4;
+    sa.sin_port = htons(port);
+    return sa;
 }
 
 namespace {
@@ -51,7 +84,7 @@ Fd createSocket(SocketType type)
     return socket;
 }
 
-Fd createSocket(SocketType type, const IpAddress& bindAddress, uint16_t bindPort, bool reuseAddr)
+Fd createSocket(SocketType type, const IpAddressPort& bindAddress, bool reuseAddr)
 {
     auto socket = createSocket(type);
     if (socket == -1) {
@@ -66,42 +99,41 @@ Fd createSocket(SocketType type, const IpAddress& bindAddress, uint16_t bindPort
         }
     }
 
-    if (!bind(socket, bindAddress, bindPort)) {
+    if (!bind(socket, bindAddress)) {
         return Fd {};
     }
     return socket;
 }
 
-bool bind(const Fd& socket, const IpAddress& address, uint16_t port)
+bool bind(const Fd& socket, const IpAddressPort& address)
 {
     ::sockaddr_in sa;
     std::memset(&sa, 0, sizeof(sa));
     sa.sin_family = AF_INET;
-    sa.sin_addr.s_addr = address.ipv4;
-    sa.sin_port = htons(port);
+    sa.sin_addr.s_addr = address.address.ipv4;
+    sa.sin_port = htons(address.port);
 
     if (::bind(socket, reinterpret_cast<const ::sockaddr*>(&sa), sizeof(sa)) == -1) {
         getLogger().log(LogSeverity::Error,
-            "Error binding socket to " + address.toString() + ":" + std::to_string(port) + ": "
-                + errnoToString(errno));
+            "Error binding socket to " + address.toString() + ": " + errnoToString(errno));
         return false;
     }
 
     return true;
 }
 
-Fd createUdpSocket(const IpAddress& bindAddress, uint16_t bindPort)
+Fd createUdpSocket(const IpAddressPort& bindAddress)
 {
     auto fd = createSocket(SocketType::Udp);
-    if (!bind(fd, bindAddress, bindPort)) {
+    if (!bind(fd, bindAddress)) {
         return Fd {};
     }
     return fd;
 }
 
-Fd createTcpListenSocket(const IpAddress& address, uint16_t port, int backlog)
+Fd createTcpListenSocket(const IpAddressPort& listenAddress, int backlog)
 {
-    auto socket = createSocket(SocketType::Tcp, address, port, true);
+    auto socket = createSocket(SocketType::Tcp, listenAddress, true);
     if (socket == -1) {
         return socket;
     }

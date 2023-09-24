@@ -75,7 +75,7 @@ int main()
 {
     setLogger(std::make_unique<SpdLogger>());
 
-    auto socket = createTcpListenSocket(IpAddress::parse("0.0.0.0").value(), 4242);
+    auto socket = createTcpListenSocket(IpAddressPort::parse("0.0.0.0:4242").value());
     if (socket == -1) {
         return 1;
     }
