@@ -1,6 +1,7 @@
 #pragma once
 
 #include <coroutine>
+#include <utility>
 
 #include "aiopp/basiccoroutine.hpp"
 
@@ -40,6 +41,23 @@ public:
     using promise_type = Promise;
 
     Task() = default;
+
+    Task(const Task&) = delete;
+    Task& operator=(const Task&) = delete;
+
+    Task(Task&& other)
+        : handle_(std::exchange(other.handle_, nullptr))
+    {
+    }
+
+    Task& operator=(Task&& other)
+    {
+        if (handle_) {
+            handle_.destroy();
+        }
+        handle_ = std::exchange(other.handle_, nullptr);
+        return *this;
+    }
 
     ~Task()
     {
