@@ -31,7 +31,7 @@ public:
 
         void unhandled_exception() noexcept { }
 
-        void return_value(Result&& res) noexcept { result = std::move(res); }
+        void return_value(Result res) noexcept { result = std::move(res); }
 
         std::suspend_always initial_suspend() noexcept { return {}; }
 
