@@ -16,6 +16,7 @@
 #include "aiopp/future.hpp"
 #include "aiopp/log.hpp"
 #include "aiopp/result.hpp"
+#include "aiopp/socket.hpp"
 #include "aiopp/task.hpp"
 
 namespace aiopp {
@@ -140,6 +141,8 @@ public:
     OperationHandle accept(int fd, ::sockaddr_in* addr, socklen_t* addrlen);
 
     OperationHandle connect(int sockfd, const ::sockaddr* addr, socklen_t addrlen);
+    OperationHandle connect(int sockfd, const ::sockaddr_in* addr);
+    Task<IoResult> connect(int sockfd, IpAddressPort addr);
 
     OperationHandle send(int sockfd, const void* buf, size_t len);
 

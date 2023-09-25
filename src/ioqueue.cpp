@@ -1,5 +1,6 @@
 #include "aiopp/ioqueue.hpp"
 
+#include <cstring>
 #include <ctime>
 
 #include <sys/eventfd.h>
@@ -42,6 +43,21 @@ IoQueue::OperationHandle IoQueue::accept(int fd, ::sockaddr_in* addr, socklen_t*
 IoQueue::OperationHandle IoQueue::connect(int sockfd, const ::sockaddr* addr, socklen_t addrlen)
 {
     return impl_->connect(sockfd, addr, addrlen);
+}
+
+IoQueue::OperationHandle IoQueue::connect(int sockfd, const ::sockaddr_in* addr)
+{
+    return connect(sockfd, reinterpret_cast<const sockaddr*>(addr), sizeof(::sockaddr_in));
+}
+
+Task<IoResult> IoQueue::connect(int sockfd, IpAddressPort addr)
+{
+    ::sockaddr_in sa;
+    std::memset(&sa, 0, sizeof(sa));
+    sa.sin_family = AF_INET;
+    sa.sin_addr.s_addr = addr.address.ipv4;
+    sa.sin_port = htons(addr.port);
+    co_return co_await connect(sockfd, &sa);
 }
 
 IoQueue::OperationHandle IoQueue::send(int sockfd, const void* buf, size_t len)
