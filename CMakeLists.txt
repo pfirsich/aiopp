@@ -84,3 +84,7 @@ set_wall(channel)
 add_executable(http-coro examples/http-coro.cpp)
 target_link_libraries(http-coro example-lib)
 set_wall(http-coro)
+
+add_executable(proxy-coro examples/proxy-coro.cpp)
+target_link_libraries(proxy-coro example-lib)
+set_wall(proxy-coro)
