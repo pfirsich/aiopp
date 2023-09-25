@@ -12,7 +12,6 @@ if(AIOPP_ENABLE_ASAN)
   include(cmake/asan.cmake)
 endif()
 
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O2")
 set(SRC
   completermap.cpp
   eventfd.cpp
