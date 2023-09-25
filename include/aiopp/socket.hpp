@@ -37,6 +37,12 @@ struct IpAddressPort {
 
     constexpr IpAddressPort() = default;
 
+    constexpr IpAddressPort(const ::sockaddr_in& sa)
+        : address(sa.sin_addr.s_addr)
+        , port(ntohs(sa.sin_port))
+    {
+    }
+
     constexpr IpAddressPort(IpAddress addr, uint16_t port)
         : address(addr)
         , port(port)
