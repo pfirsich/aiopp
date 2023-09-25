@@ -12,10 +12,8 @@
 #include <netinet/in.h>
 
 #include "aiopp/basiccoroutine.hpp"
-#include "aiopp/completermap.hpp"
 #include "aiopp/function.hpp"
 #include "aiopp/future.hpp"
-#include "aiopp/iouring.hpp"
 #include "aiopp/log.hpp"
 #include "aiopp/result.hpp"
 #include "aiopp/task.hpp"
@@ -46,30 +44,17 @@ private:
     int result_ = std::numeric_limits<int>::min(); // not a valid errno
 };
 
+struct IoQueueImpl;
+
 class IoQueue {
-    static constexpr uint64_t UserDataInvalid = std::numeric_limits<uint64_t>::max() - 1;
-    static constexpr uint64_t UserDataIgnore = std::numeric_limits<uint64_t>::max();
-
 public:
-    using Timespec = IoURing::Timespec;
+    using OperationId = uint64_t;
+    static constexpr OperationId OpIdInvalid = std::numeric_limits<OperationId>::max() - 1;
+    static constexpr OperationId OpIdIgnore = std::numeric_limits<OperationId>::max();
+
     // sleep accuracy on linux is a few ms anyways, so I think millis is fine.
-    using ChronoDuration = std::chrono::milliseconds;
-    using ChronoTimePoint = std::chrono::time_point<std::chrono::steady_clock>;
-
-    static void setTimespec(Timespec& ts, ChronoDuration duration);
-    static void setTimespec(Timespec& ts, ChronoTimePoint tp);
-
-    struct Duration : public Timespec {
-        Duration() = default;
-        Duration(ChronoDuration ms);
-        void set(ChronoDuration ms);
-    };
-
-    struct TimePoint : public Timespec {
-        TimePoint() = default;
-        TimePoint(ChronoTimePoint tp);
-        void set(ChronoTimePoint tp);
-    };
+    using Duration = std::chrono::milliseconds;
+    using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 
     struct OperationAwaiter;
 
@@ -95,9 +80,9 @@ public:
 
     struct OperationHandle {
         IoQueue* io = nullptr;
-        uint64_t userData = UserDataInvalid;
+        OperationId id = OpIdInvalid;
 
-        bool valid() const { return io && userData != UserDataInvalid; }
+        bool valid() const { return io && id != OpIdInvalid; }
         explicit operator bool() const { return valid(); }
 
         void setCompleter(std::unique_ptr<Completer> completer) const
@@ -105,7 +90,7 @@ public:
             io->setCompleter(*this, std::move(completer));
         }
 
-        void cancel() const { io->cancel(*this, true); }
+        void cancel(bool cancelHandler) const { io->cancel(*this, cancelHandler); }
 
         auto operator co_await() const
         {
@@ -128,7 +113,7 @@ public:
         ~OperationAwaiter()
         {
             if (operation) {
-                operation.cancel();
+                operation.cancel(true);
             }
         }
 
@@ -144,9 +129,9 @@ public:
         IoResult await_resume() const noexcept { return result; }
     };
 
-    // SQ Polling is disabled by default, because while it does reduce the amount of syscalls, it
-    // barely increases throughput and noticably increases CPU usage when the queue is idling.
-    IoQueue(size_t size = 1024, bool submissionQueuePolling = false);
+    IoQueue(size_t size = 1024);
+
+    ~IoQueue(); // We only need this to destruct incomplete IoQueueImpl
 
     size_t getSize() const;
 
@@ -197,13 +182,10 @@ public:
             sizeof(SockAddr));
     }
 
-    OperationHandle timeout(Timespec* ts, uint32_t flags);
     Task<IoResult> timeout(Duration dur);
     Task<IoResult> timeout(TimePoint tp);
 
     // The passed operation will return ECANCELED in case the timeout expired.
-    OperationHandle linkTimeout(Timespec* ts, int flags, OperationHandle op);
-    Task<IoResult> timeout(Timespec* ts, int flags, OperationHandle op);
     Task<IoResult> timeout(Duration dur, OperationHandle op);
     Task<IoResult> timeout(TimePoint tp, OperationHandle op);
 
@@ -223,23 +205,21 @@ public:
         co_return future.get();
     }
 
-    // Note that the cancelation is asynchronous as well, so it is also possible that the operation
-    // completes before the cancelation has been consumed. In this case the handler still might get
-    // called with a successful result instead of ECANCELED. If cancelHandler is true the handler
-    // will not be called again in either case, even if the async cancelation could not be submitted
-    // at all.
+    // Note that the cancelation can be asynchronous as well, so it is also possible that the
+    // operation to be canceled completes successfuly before the cancelation has been consumed. If
+    // cancelHandler is true then the handler will be disabled asynchronously as part of this
+    // function, and the handler will not be called in either case.
     OperationHandle cancel(OperationHandle operation, bool cancelHandler);
 
     void run();
 
 private:
-    OperationHandle finalizeSqe(io_uring_sqe* sqe, uint64_t userData);
-    OperationHandle finalizeSqe(io_uring_sqe* sqe);
-    void setCompleter(OperationHandle operation, std::unique_ptr<Completer> completer);
+    friend struct IoQueueImpl;
 
-    IoURing ring_;
-    CompleterMap completers_;
-    uint64_t nextUserData_ = 0;
-    io_uring_sqe* lastSqe_ = nullptr;
+    void setCompleter(OperationHandle operation, std::unique_ptr<Completer> completer);
+    OperationId getNextOpId();
+
+    OperationId nextOpId_ = 0;
+    std::unique_ptr<IoQueueImpl> impl_;
 };
 }

@@ -12,11 +12,18 @@ if(AIOPP_ENABLE_ASAN)
   include(cmake/asan.cmake)
 endif()
 
+if(NOT AIOPP_IOQUEUE_BACKEND)
+  set(AIOPP_IOQUEUE_BACKEND iouring)
+endif()
+
+message("IO Queue Backend: ${AIOPP_IOQUEUE_BACKEND}")
+
 set(SRC
   completermap.cpp
   eventfd.cpp
   fd.cpp
   ioqueue.cpp
+  ioqueue_impl_${AIOPP_IOQUEUE_BACKEND}.cpp
   iouring.cpp
   log.cpp
   net.cpp
@@ -34,6 +41,11 @@ if((NOT LIBURING_INCLUDE_DIR) OR(NOT LIBURING_LIBRARY))
 endif()
 
 add_library(aiopp ${SRC})
+
+if(AIOPP_IOQUEUE_BACKEND STREQUAL iouring)
+  target_compile_definitions(aiopp PRIVATE AIOPP_IOQUEUE_BACKEND_IOURING)
+endif()
+
 target_include_directories(aiopp PUBLIC include)
 target_include_directories(aiopp PUBLIC ${LIBURING_INCLUDE_DIR})
 target_link_libraries(aiopp PUBLIC ${LIBURING_LIBRARY})
