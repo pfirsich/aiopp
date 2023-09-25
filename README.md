@@ -6,6 +6,15 @@ It provides an `IoQueue` abstraction to issue IO operations with completion call
 
 There is also early support for issuing IO operations on an `IoQueue` using coroutines, examples of which can also be found in the examples directory.
 
+## Building
+It's a pretty boring CMake project, but it simply uses `find_path`/`find_library` to find liburing and `find_package` to find spdlog and fmt, so make sure to install those with your system package manager. On PopOS they are named `liburing-dev`, `libspdlog-dev` and `libfmt-dev` respectively.
+
+Then just do "ye old CMake dance":
+```bash
+$ cmake -B build -G Ninja
+$ cmake --build build
+```
+
 ## To Do
 * Optimize CompleterMap (linear probing is BAD) and CompleterMap is a bottleneck (~15% of runtime)
 * Multi-Shot Accept
