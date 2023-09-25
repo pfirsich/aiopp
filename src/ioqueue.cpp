@@ -140,6 +140,7 @@ namespace {
                 .msg_namelen = addrLen,
                 .msg_iov = &iov,
                 .msg_iovlen = 1,
+                .msg_control = nullptr,
                 .msg_controllen = 0,
                 .msg_flags = 0,
             }
