@@ -2,8 +2,6 @@
 
 #include <cstdlib>
 
-#include <spdlog/spdlog.h>
-
 namespace aiopp {
 void* CompleterMap::Empty = nullptr;
 void* CompleterMap::Tombstone = reinterpret_cast<void*>(std::numeric_limits<uintptr_t>::max());
