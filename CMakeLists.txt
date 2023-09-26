@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.0)
+cmake_minimum_required(VERSION 3.3.0)
 
 project(aiopp)
 
@@ -12,11 +12,15 @@ if(AIOPP_ENABLE_ASAN)
   include(cmake/asan.cmake)
 endif()
 
-if(NOT AIOPP_IOQUEUE_BACKEND)
-  set(AIOPP_IOQUEUE_BACKEND iouring)
-endif()
+set(AIOPP_IOQUEUE_DEFAULT_BACKEND iouring)
+set(AIOPP_IOQUEUE_BACKEND_OPTIONS iouring)
+set(AIOPP_IOQUEUE_BACKEND "${AIOPP_IOQUEUE_DEFAULT_BACKEND}" CACHE STRING "Which backend to use for IO (one of ${AIOPP_IOQUEUE_BACKEND_OPTIONS})")
 
 message("IO Queue Backend: ${AIOPP_IOQUEUE_BACKEND}")
+
+if(NOT ${AIOPP_IOQUEUE_BACKEND} IN_LIST AIOPP_IOQUEUE_BACKEND_OPTIONS)
+  message(FATAL_ERROR "AIOPP_IOQUEUE_BACKEND must be one of ${AIOPP_IOQUEUE_BACKEND_OPTIONS}")
+endif()
 
 set(SRC
   completermap.cpp
@@ -51,40 +55,11 @@ target_include_directories(aiopp PUBLIC ${LIBURING_INCLUDE_DIR})
 target_link_libraries(aiopp PUBLIC ${LIBURING_LIBRARY})
 set_wall(aiopp)
 
-find_package(spdlog REQUIRED)
-find_package(fmt REQUIRED)
+# This will only be true if this project is not used as a subdirectory (e.g. FetchContent)
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+  option(AIOPP_BUILD_EXAMPLES "Whether to build examples" ON)
 
-add_library(example-lib examples/spdlogger.cpp)
-target_link_libraries(example-lib aiopp spdlog fmt)
-
-add_executable(echo-tcp examples/echo-tcp.cpp)
-target_link_libraries(echo-tcp example-lib)
-set_wall(echo-tcp)
-
-add_executable(echo-udp examples/echo-udp.cpp)
-target_link_libraries(echo-udp example-lib)
-set_wall(echo-udp)
-
-add_executable(echo-tcp-coro examples/echo-tcp-coro.cpp)
-target_link_libraries(echo-tcp-coro example-lib)
-set_wall(echo-tcp-coro)
-
-add_executable(echo-udp-coro examples/echo-udp-coro.cpp)
-target_link_libraries(echo-udp-coro example-lib)
-set_wall(echo-udp-coro)
-
-add_executable(resolve examples/resolve.cpp)
-target_link_libraries(resolve example-lib)
-set_wall(resolve)
-
-add_executable(channel examples/channel.cpp)
-target_link_libraries(channel example-lib)
-set_wall(channel)
-
-add_executable(http-coro examples/http-coro.cpp)
-target_link_libraries(http-coro example-lib)
-set_wall(http-coro)
-
-add_executable(proxy-coro examples/proxy-coro.cpp)
-target_link_libraries(proxy-coro example-lib)
-set_wall(proxy-coro)
+  if(AIOPP_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+  endif()
+endif()
